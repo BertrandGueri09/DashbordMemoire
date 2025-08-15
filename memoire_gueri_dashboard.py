@@ -25,7 +25,8 @@ st.set_page_config(
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
-st.title("📈 Dashboard CFAOCI Trading  stock market - BRVM")
+st.title("📈 Dashboard CFAOCI Trading  stock market"
+" - BRVM")
 st.markdown("**Analyse technique et suivi de performance sur la Bourse Régionale des Valeurs Mobilières**")
 st.markdown("---")
 
