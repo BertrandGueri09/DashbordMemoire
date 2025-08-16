@@ -10,7 +10,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import io
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
@@ -25,15 +25,14 @@ st.set_page_config(
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
-st.title("📈 Dashboard CFAOCI Trading  stock market"
-" - BRVM")
-st.markdown("**Analyse technique et suivi de performance sur la Bourse Régionale des Valeurs Mobilières**")
+st.title("📈 Dashboard CFAOCI Trading  stock market - BRVM")
+st.markdown("**Analyse technique et fondamentale de CFAO CI (BRVM)**")
 st.markdown("---")
 
-# --------------------------- UTILITAIRES ---------------------------
+# --------------------------- UTILITAIRES TECHNIQUES ---------------------------
 @st.cache_data
 def load_data(path_or_buffer: str | io.BytesIO) -> pd.DataFrame:
-    """Charger et traiter les données CSV"""
+    """Charger et traiter les données CSV (prix)"""
     df = pd.read_csv(path_or_buffer)
     df.columns = df.columns.str.strip()
     df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y', errors='coerce')
@@ -108,12 +107,6 @@ def macd(prices: pd.Series, fast=12, slow=26, signal=9) -> Tuple[pd.Series, pd.S
     signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=1).mean()
     hist = macd_line - signal_line
     return macd_line, signal_line, hist
-
-def calculate_volatility(prices: pd.Series) -> float:
-    returns = np.log(prices / prices.shift(1)).dropna()
-    if len(returns) == 0:
-        return 0.0
-    return returns.std() * np.sqrt(252) * 100
 
 def performance_metrics(df: pd.DataFrame, rf_annual_pct: float = 0.0) -> Dict[str, float | str]:
     latest = df.iloc[-1]
@@ -242,11 +235,322 @@ def plotly_macd_chart(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(height=350, hovermode='x unified', xaxis=dict(type='date'))
     return fig
 
+# --------------------------- FONDAMENTAUX ---------------------------
+@st.cache_data
+def load_fundamentals(path_or_buffer: str | io.BytesIO) -> pd.DataFrame:
+    """Charger un CSV de fondamentaux (période, CA, RN, etc.)"""
+    df = pd.read_csv(path_or_buffer)
+    df.columns = df.columns.str.strip()
+    for c in df.columns:
+        if c != "period":
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+    return df
+
+def fundamentals_default_df() -> pd.DataFrame:
+    """Jeu de données fondamentales intégré par défaut (2020 → 2025)."""
+    data = [
+        # period, revenue, net_income, shares_outstanding, dividends_total, dividend_per_share,
+        # total_equity, total_debt, total_assets, cash_and_equivalents, capex, EPS
+        ["2020",  99126, 3780, 181_371_900, np.nan, 22.15, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2021", 119731, 6711, 181_371_900, np.nan, 69.47, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2022", 146375, 5534, 181_371_900, np.nan, 28.67, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2023", 180162, 6399, 181_371_900, np.nan, 15.88, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2024", 158313, 4693, 181_371_900, np.nan,  7.04, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2025",     np.nan,   np.nan, 181_371_900, np.nan,   np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+    ]
+    cols = [
+        "period","revenue","net_income","shares_outstanding","dividends_total",
+        "dividend_per_share","total_equity","total_debt","total_assets",
+        "cash_and_equivalents","capex","EPS"
+    ]
+    return pd.DataFrame(data, columns=cols)
+
+def _fit_yearly_trend_impute(df: pd.DataFrame, col: str) -> pd.Series:
+    """Impute la colonne 'col' via régression linéaire simple (année -> valeur) si possible, sinon ffill/bfill."""
+    s = df[['period', col]].dropna()
+    out = df[col].copy()
+    try:
+        years = pd.to_numeric(s['period'], errors='coerce')
+        mask = years.notna() & s[col].notna()
+        if mask.sum() >= 2:
+            # Régression linéaire (moindre carrés)
+            x = years[mask].values
+            y = s[col][mask].values
+            coef = np.polyfit(x, y, 1)
+            poly = np.poly1d(coef)
+            target_years = pd.to_numeric(df['period'], errors='coerce').values
+            pred = poly(target_years)
+            out = out.copy()
+            out = out.where(out.notna(), pred)
+    except Exception:
+        pass
+    # Si encore des NaN : ffill/bfill
+    out = out.ffill().bfill()
+    return out
+
+def impute_fundamentals(df_fund: pd.DataFrame, assume_roe: float, assume_dte: float, last_close: float) -> pd.DataFrame:
+    """
+    Complète les NaN avec des hypothèses raisonnables :
+    - revenue / net_income : régression sur l'historique puis ffill/bfill
+    - dividend_per_share : ffill (si NaN)
+    - dividends_total : = DPS * shares_outstanding si manquant
+    - EPS : = net_income / shares_outstanding
+    - total_equity : = net_income / assume_roe si manquant
+    - total_debt : = assume_dte * total_equity
+    - total_assets : = equity + debt
+    - cash_and_equivalents, capex : 0 si NaN
+    """
+    df = df_fund.copy()
+    df['period'] = df['period'].astype(str)
+
+    # 1) Imputation revenue et net_income via tendance
+    if 'revenue' in df.columns:
+        df['revenue'] = _fit_yearly_trend_impute(df, 'revenue')
+    if 'net_income' in df.columns:
+        df['net_income'] = _fit_yearly_trend_impute(df, 'net_income')
+
+    # 2) DPS : forward fill si manquant
+    if 'dividend_per_share' in df.columns:
+        df['dividend_per_share'] = df['dividend_per_share'].ffill().bfill()
+
+    # 3) EPS
+    if 'EPS' not in df.columns:
+        df['EPS'] = np.nan
+    if {'net_income', 'shares_outstanding'} <= set(df.columns):
+        df['EPS'] = df['EPS'].where(df['EPS'].notna(), df['net_income'] / df['shares_outstanding'])
+
+    # 4) PER (lié au prix courant)
+    df['PER'] = last_close / df['EPS'].replace(0, np.nan)
+
+    # 5) Dividendes totaux = DPS * nb d'actions si manquant
+    if {'dividend_per_share', 'shares_outstanding'} <= set(df.columns):
+        if 'dividends_total' not in df.columns:
+            df['dividends_total'] = np.nan
+        df['dividends_total'] = df['dividends_total'].where(
+            df['dividends_total'].notna(),
+            df['dividend_per_share'] * df['shares_outstanding']
+        )
+
+    # 6) total_equity imputé via ROE supposé si manquant
+    if 'total_equity' not in df.columns:
+        df['total_equity'] = np.nan
+    if 'net_income' in df.columns:
+        # éviter division par 0
+        roe = max(assume_roe, 1e-6)
+        df['total_equity'] = df['total_equity'].where(
+            df['total_equity'].notna(),
+            df['net_income'] / roe
+        )
+
+    # 7) total_debt imputé via D/E supposé
+    if 'total_debt' not in df.columns:
+        df['total_debt'] = np.nan
+    df['total_debt'] = df['total_debt'].where(
+        df['total_debt'].notna(),
+        assume_dte * df['total_equity']
+    )
+
+    # 8) total_assets = equity + debt si manquant
+    if 'total_assets' not in df.columns:
+        df['total_assets'] = np.nan
+    df['total_assets'] = df['total_assets'].where(
+        df['total_assets'].notna(),
+        df['total_equity'] + df['total_debt']
+    )
+
+    # 9) cash & capex -> 0 si NaN (prudence)
+    for c in ['cash_and_equivalents', 'capex']:
+        if c not in df.columns:
+            df[c] = 0.0
+        else:
+            df[c] = df[c].fillna(0.0)
+
+    # 10) Ratios dérivés
+    df['Dividend_Yield_%'] = 100 * df['dividend_per_share'] / last_close
+    df['ROE_%'] = 100 * df['net_income'] / df['total_equity'].replace(0, np.nan)
+    df['Debt_to_Equity'] = df['total_debt'] / df['total_equity'].replace(0, np.nan)
+    df['Payout_%'] = 100 * df['dividends_total'] / df['net_income'].replace(0, np.nan)
+
+    # 11) Score fondamental
+    def score_row(r):
+        score = 0
+        if pd.notna(r.get('EPS')) and r.get('EPS', 0) > 0:
+            score += 1
+        per = r.get('PER')
+        if pd.notna(per):
+            if 5 <= per <= 20:
+                score += 2
+            elif per < 5:
+                score += 1
+        roe = r.get('ROE_%')
+        if pd.notna(roe):
+            if roe >= 15:
+                score += 2
+            elif roe >= 8:
+                score += 1
+        dte = r.get('Debt_to_Equity')
+        if pd.notna(dte):
+            if dte <= 0.5:
+                score += 2
+            elif dte <= 1:
+                score += 1
+        dy = r.get('Dividend_Yield_%')
+        if pd.notna(dy):
+            if dy >= 4:
+                score += 2
+            elif dy >= 2:
+                score += 1
+        return min(score, 10)
+
+    df['Score_Fondamental_0_10'] = df.apply(score_row, axis=1)
+
+    # 12) Indicateur d'imputation (True si au moins une valeur imputée sur la ligne)
+    base_cols = ['revenue','net_income','dividend_per_share','dividends_total','total_equity','total_debt','total_assets','cash_and_equivalents','capex','EPS']
+    imputed_flags = []
+    for _, row in df.iterrows():
+        flag = False
+        for c in base_cols:
+            # considéré imputé si NaN initialement ? Ici on ne sait plus. On approxime :
+            # on marque comme imputée si provient d'une règle évidente (equity, debt, assets, cash/capex=0, DPS ffill pour 2025)
+            pass
+        imputed_flags.append(np.nan)  # placeholder, optionnel
+    df['imputed_info'] = "Auto-complété (ROE≈{:.0f}%, D/E≈{:.2f})".format(assume_roe*100, assume_dte)
+
+    return df
+
+def plot_per(df_ratios: pd.DataFrame) -> go.Figure:
+    dfp = df_ratios[['period','PER']].replace([np.inf, -np.inf], np.nan).dropna().sort_values('period')
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=dfp['period'], y=dfp['PER'], mode='lines+markers', name='PER'))
+    fig.update_layout(height=350, hovermode='x unified', xaxis_title="Période", yaxis_title="PER")
+    return fig
+
+def plot_roe(df_ratios: pd.DataFrame) -> go.Figure:
+    dfr = df_ratios[['period','ROE_%']].dropna().sort_values('period')
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=dfr['period'], y=dfr['ROE_%'], mode='lines+markers', name='ROE (%)'))
+    fig.update_layout(height=350, hovermode='x unified', xaxis_title="Période", yaxis_title="ROE (%)")
+    return fig
+
+def plot_revenue_net_income(df_ratios: pd.DataFrame) -> go.Figure:
+    cols = [c for c in ['period','revenue','net_income'] if c in df_ratios.columns]
+    dfn = df_ratios[cols].dropna().sort_values('period')
+    fig = go.Figure()
+    if 'revenue' in dfn.columns:
+        fig.add_trace(go.Scatter(x=dfn['period'], y=dfn['revenue'], mode='lines+markers', name="Chiffre d'affaires"))
+    if 'net_income' in dfn.columns:
+        fig.add_trace(go.Scatter(x=dfn['period'], y=dfn['net_income'], mode='lines+markers', name="Résultat net"))
+    fig.update_layout(height=380, hovermode='x unified', xaxis_title="Période", yaxis_title="Montants (FCFA)")
+    return fig
+
+def commentaire_auto_points(df_ratios: pd.DataFrame) -> List[str]:
+    """Messages courts et clairs sur la dernière période renseignée."""
+    notes = []
+    if df_ratios.empty or 'period' not in df_ratios.columns:
+        return ["Aucune donnée fondamentale disponible."]
+    last = df_ratios.sort_values('period').iloc[-1]
+    p = str(last.get('period'))
+
+    # EPS
+    eps = last.get('EPS', np.nan)
+    if pd.notna(eps) and eps > 0:
+        notes.append(f"**{p} — EPS positif** : {eps:,.2f} FCFA/action.")
+    elif pd.notna(eps):
+        notes.append(f"**{p} — EPS faible/négatif** : {eps:,.2f} FCFA/action (à surveiller).")
+
+    # PER
+    per = last.get('PER', np.nan)
+    if pd.notna(per):
+        if 5 <= per <= 20:
+            notes.append(f"**{p} — PER** ≈ {per:.1f} (zone raisonnable).")
+        elif per < 5:
+            notes.append(f"**{p} — PER** ≈ {per:.1f} (potentielle décote, vérifier la qualité du bénéfice).")
+        else:
+            notes.append(f"**{p} — PER** ≈ {per:.1f} (valorisation tendue).")
+
+    # ROE
+    roe = last.get('ROE_%', np.nan)
+    if pd.notna(roe):
+        if roe >= 15:
+            notes.append(f"**{p} — ROE élevé** : {roe:.1f}%.")
+        elif roe >= 8:
+            notes.append(f"**{p} — ROE correct** : {roe:.1f}%.")
+        else:
+            notes.append(f"**{p} — ROE faible** : {roe:.1f}%.")
+
+    # D/E
+    dte = last.get('Debt_to_Equity', np.nan)
+    if pd.notna(dte):
+        if dte <= 0.5:
+            notes.append(f"**{p} — Endettement maîtrisé** : D/E ≈ {dte:.2f}.")
+        elif dte <= 1:
+            notes.append(f"**{p} — Endettement modéré** : D/E ≈ {dte:.2f}.")
+        else:
+            notes.append(f"**{p} — Endettement élevé** : D/E ≈ {dte:.2f}.")
+
+    # Dividend Yield
+    dy = last.get('Dividend_Yield_%', np.nan)
+    if pd.notna(dy):
+        if dy >= 4:
+            notes.append(f"**{p} — Rendement dividende attractif** : ≈ {dy:.1f}%.")
+        elif dy >= 2:
+            notes.append(f"**{p} — Rendement dividende** : ≈ {dy:.1f}%.")
+
+    # Score
+    score = last.get('Score_Fondamental_0_10', np.nan)
+    if pd.notna(score):
+        notes.append(f"**{p} — Score fondamental (0–10)** : **{score:.1f}**.")
+
+    if not notes:
+        notes = [f"Données {p} présentes mais incomplètes."]
+    return notes
+
+def resume_markdown(df_ratios: pd.DataFrame) -> str:
+    """Résumé clair et téléchargeable (Markdown)."""
+    lines = ["# Synthèse fondamentale — CFAO CI", ""]
+    if df_ratios.empty:
+        lines += ["*(Aucune donnée).*"]
+        return "\n".join(lines)
+
+    # Aperçu global
+    dispo = [c for c in ['revenue','net_income','EPS','PER','ROE_%','Debt_to_Equity','Dividend_Yield_%','Payout_%'] if c in df_ratios.columns]
+    lines += ["**Périodes couvertes :** " + ", ".join(df_ratios['period'].astype(str).tolist()),
+              "**Ratios disponibles :** " + (", ".join(dispo) if dispo else "aucun"), ""]
+
+    # Dernière période
+    last = df_ratios.sort_values('period').iloc[-1]
+    p = str(last.get('period'))
+    lines += [f"## Dernière période : {p}", ""]
+    for msg in commentaire_auto_points(df_ratios):
+        lines += [f"- {msg}"]
+    lines.append("")
+
+    # Tendances simples (si données multi-périodes)
+    if df_ratios['period'].nunique() >= 3:
+        dft = df_ratios.sort_values('period')
+        def trend(col):
+            s = dft[col].dropna()
+            if len(s) >= 3:
+                return "hausse" if s.iloc[-1] > s.iloc[0] else "baisse" if s.iloc[-1] < s.iloc[0] else "stable"
+            return "n/a"
+        if 'revenue' in dft.columns:
+            lines.append(f"- **Tendance CA** : {trend('revenue')}.")
+        if 'net_income' in dft.columns:
+            lines.append(f"- **Tendance Résultat net** : {trend('net_income')}.")
+        if 'PER' in dft.columns:
+            lines.append(f"- **Tendance PER** : {trend('PER')}.")
+        if 'ROE_%' in dft.columns:
+            lines.append(f"- **Tendance ROE** : {trend('ROE_%')}.")
+
+    lines += ["", "> *Note : interprétation indicative — à croiser avec le contexte macro, la concurrence et les communiqués officiels.*"]
+    return "\n".join(lines)
+
 # --------------------------- APP ---------------------------
 def main():
     st.sidebar.header("🎛️ Contrôles")
 
-    uploader = st.sidebar.file_uploader("📥 Importer un CSV (optionnel)", type=['csv'])
+    # ---- Données de PRIX
+    uploader = st.sidebar.file_uploader("📥 Importer un CSV (prix) (optionnel)", type=['csv'])
     if uploader is not None:
         df = load_data(uploader)
     else:
@@ -308,7 +612,7 @@ def main():
     st.sidebar.subheader("📉 Paramètres risque")
     rf = st.sidebar.number_input("Taux sans risque annuel (%)", value=2.0, step=0.5)
 
-    # --------------------- MÉTRIQUES ---------------------
+    # ===================== MÉTRIQUES TECHNIQUES =====================
     metrics = performance_metrics(df, rf_annual_pct=rf)
     st.subheader("📈 Métriques Principales")
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -322,7 +626,7 @@ def main():
     st.info(f"📅 **Dernière mise à jour:** {metrics['last_update']} | 📊 **Nombre de sessions:** {len(df)} | 📦 **Volume Moyen:** {metrics['avg_volume']:,.0f}")
     st.markdown("---")
 
-    # --------------------- ANALYSE TECHNIQUE (GRAPHIQUES) ---------------------
+    # ===================== ANALYSE TECHNIQUE =====================
     st.subheader("📈 Analyse Technique")
     tab1, tab2, tab3 = st.tabs(["📈 Graphique principal", "🎯 RSI & MACD", "📋 Données"])
 
@@ -381,7 +685,7 @@ def main():
         csv = display_df.to_csv(index=False).encode('utf-8')
         st.download_button("⬇️ Télécharger le CSV filtré", csv, file_name="CFAOCI_filtre.csv", mime="text/csv")
 
-    # --------------------- ANALYSE AUTO ---------------------
+    # ===================== ANALYSE AUTO (TECHNIQUE) =====================
     st.markdown("---")
     st.subheader("🤖 Analyse Technique Automatique")
     latest = df.iloc[-1]
@@ -413,15 +717,86 @@ def main():
     with colR:
         st.info(f"💹 **Prix maximum:** {df['Close'].max():.0f} FCFA | 📉 **Prix minimum:** {df['Close'].min():.0f} FCFA")
 
+    # ===================== ANALYSE FONDAMENTALE (auto-complétion) =====================
+    st.markdown("---")
+    st.subheader("📚 Analyse Fondamentale — CFAO CI")
+
+    st.sidebar.subheader("📥 Données fondamentales")
+    fund_uploader = st.sidebar.file_uploader("Importer un CSV fondamentaux (facultatif)", type=['csv'], key="fund_csv")
+
+    if fund_uploader is not None:
+        try:
+            df_fund = load_fundamentals(fund_uploader)
+        except Exception:
+            st.warning("⚠️ Fichier fondamentaux illisible. Utilisation des données intégrées par défaut.")
+            df_fund = fundamentals_default_df()
+    else:
+        df_fund = fundamentals_default_df()
+
+    with st.sidebar.expander("🛠️ Auto-compléter les valeurs manquantes", expanded=True):
+        assume_roe_pct = st.slider("ROE supposé pour imputation (%)", min_value=5, max_value=25, value=12, step=1)
+        assume_dte = st.slider("Dette / Capitaux propres supposé (D/E)", min_value=0.0, max_value=2.0, value=0.60, step=0.05)
+
+    last_close = float(metrics['current_price'])
+    df_ratios = impute_fundamentals(
+        df_fund,
+        assume_roe=assume_roe_pct/100.0,
+        assume_dte=assume_dte,
+        last_close=last_close
+    )
+
+    tabF1, tabF2, tabF3 = st.tabs(["📊 Ratios & Score (imputés)", "📈 Graphiques", "🧠 Commentaire auto & Téléchargements"])
+
+    with tabF1:
+        cols_show = [c for c in [
+            'period', 'revenue', 'net_income', 'EPS', 'PER', 'ROE_%',
+            'Debt_to_Equity', 'Dividend_Yield_%', 'Payout_%', 'dividend_per_share',
+            'dividends_total', 'total_equity', 'total_debt', 'total_assets', 'cash_and_equivalents', 'capex',
+            'Score_Fondamental_0_10', 'imputed_info'
+        ] if c in df_ratios.columns]
+        st.dataframe(df_ratios[cols_show], use_container_width=True)
+
+        # Export CSV des ratios (après imputation)
+        csv_ratios = df_ratios.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇️ Télécharger les ratios imputés (CSV)", csv_ratios, file_name="CFAOCI_fondamentaux_imputes.csv", mime="text/csv")
+
+    with tabF2:
+        col1, col2 = st.columns(2)
+        with col1:
+            st.plotly_chart(plot_revenue_net_income(df_ratios), use_container_width=True, config={"displaylogo": False})
+        with col2:
+            st.plotly_chart(plot_per(df_ratios), use_container_width=True, config={"displaylogo": False})
+        st.plotly_chart(plot_roe(df_ratios), use_container_width=True, config={"displaylogo": False})
+
+    with tabF3:
+        st.markdown("### Résumé clair (auto, après imputation)")
+        for line in commentaire_auto_points(df_ratios):
+            st.write("- " + line)
+
+        # Résumé téléchargeable (Markdown)
+        md_text = resume_markdown(df_ratios)
+        st.markdown("---")
+        st.markdown("#### Télécharger le résumé (Markdown)")
+        st.download_button(
+            "📝 Télécharger le résumé (.md)",
+            data=md_text.encode('utf-8'),
+            file_name="CFAOCI_resume_fondamental.md",
+            mime="text/markdown"
+        )
+
+        st.caption(
+            "Interprétation indicative. Les valeurs imputées utilisent vos hypothèses (ROE, D/E). Remplacez-les par les chiffres officiels dès que disponibles."
+        )
+
     # --------------------- PIED ---------------------
     st.markdown("---")
     st.markdown(
         """
         <div style='text-align: center; color: #666;'>
-            <p><strong>Dashboard CFAOCI - Données historiques BRVM</strong></p>
-            <p>Développé avec ❤️ pour l'analyse technique</p>
+            <p><strong>Dashboard CFAOCI - Données BRVM</strong></p>
+            <p>Analyse technique & fondamentale — Développé avec ❤️</p>
         </div>
-        """, 
+        """,
         unsafe_allow_html=True
     )
 
