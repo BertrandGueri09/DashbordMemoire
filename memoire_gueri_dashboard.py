@@ -437,12 +437,12 @@ def commentaire_auto_points(df_ratios: pd.DataFrame) -> List[str]:
 
 # --------------------------- APP ---------------------------
 def main():
-    st.title("📈 Dashboard CFAOCI - BRVM")
+    st.title("Dashboard CFAOCI - BRVM")
     st.markdown("**Analyse technique et fondamentale de CFAO CI**")
     
     # SIDEBAR CONDENSÉ
     with st.sidebar:
-        st.header("⚙️ Contrôles")
+        st.header("Contrôles")
         
         # Données
         uploader = st.file_uploader("CSV Prix (opt.)", type=['csv'], key="price_csv")
@@ -452,11 +452,11 @@ def main():
             try:
                 df = load_data('CFAOCI.csv')
             except Exception:
-                st.error("❌ Impossible de charger les données")
+                st.error("Impossible de charger les données")
                 st.stop()
         
         # Période
-        st.subheader("📅 Période")
+        st.subheader("Période")
         freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'])
         freq_map = {'Jour': 'D', 'Semaine': 'W', 'Mois': 'M'}
         
@@ -472,7 +472,7 @@ def main():
         df = resample_ohlcv(df, freq_map[freq])
         
         # Indicateurs
-        st.subheader("📊 Indicateurs")
+        st.subheader("Indicateurs")
         indicators = st.multiselect("Sélection", ['MM', 'EMA', 'Bollinger', 'RSI', 'MACD'], default=['MM', 'RSI'])
         
         # Paramètres compacts
@@ -499,12 +499,12 @@ def main():
         }
         
         # Style
-        st.subheader("🎨 Style")
+        st.subheader("Style")
         chart_type = st.radio("Type", ['Ligne', 'Chandelles'])
         rf = st.number_input("Taux sans risque (%)", value=2.0, step=0.5)
         
         # Fondamentaux
-        st.subheader("📋 Fondamentaux")
+        st.subheader("Fondamentaux")
         fund_uploader = st.file_uploader("CSV Fond. (opt.)", type=['csv'], key="fund_csv")
         col1, col2 = st.columns(2)
         with col1:
@@ -528,7 +528,7 @@ def main():
     df_ratios = impute_fundamentals(df_fund, assume_roe=assume_roe_pct/100.0, assume_dte=assume_dte, last_close=last_close)
 
     # MÉTRIQUES
-    st.subheader("📊 Métriques Principales")
+    st.subheader("Métriques Principales")
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("Prix Actuel", f"{metrics['current_price']:.0f} FCFA")
     col2.metric("Rendement Total", f"{metrics['total_return']:.1f}%")
@@ -541,12 +541,12 @@ def main():
     col_left, col_right = st.columns([3, 2])
     
     with col_left:
-        st.subheader("📈 Graphique Principal")
+        st.subheader("Graphique Principal")
         main_fig = plotly_combined_chart(df, chart_type, params)
         st.plotly_chart(main_fig, use_container_width=True, config={"displaylogo": False})
     
     with col_right:
-        st.subheader("📋 Analyse Fondamentale")
+        st.subheader("Analyse Fondamentale")
         fund_fig = plot_fundamentals_summary(df_ratios)
         st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
         
@@ -559,7 +559,7 @@ def main():
     col_analysis, col_downloads = st.columns([2, 1])
     
     with col_analysis:
-        st.subheader("🔍 Analyse Technique Auto")
+        st.subheader("Analyse Technique Auto")
         latest = df.iloc[-1]
         notes = []
         
@@ -588,18 +588,18 @@ def main():
         st.info(f"**Min/Max période:** {df['Close'].min():.0f} - {df['Close'].max():.0f} FCFA | **Sessions:** {len(df)} | **Dernière MAJ:** {metrics['last_update']}")
     
     with col_downloads:
-        st.subheader("💾 Téléchargements")
+        st.subheader("Téléchargements")
         
         # CSV Prix filtrés
         display_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Variation']].copy()
         display_df['Date'] = display_df['Date'].dt.strftime('%d/%m/%Y')
         csv_prix = display_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📈 CSV Prix", csv_prix, "CFAOCI_prix.csv", "text/csv")
+        st.download_button("CSV Prix", csv_prix, "CFAOCI_prix.csv", "text/csv")
         
         # CSV Fondamentaux
         cols_fund = [c for c in ['period', 'revenue', 'net_income', 'EPS', 'PER', 'ROE_%', 'Debt_to_Equity', 'Dividend_Yield_%', 'Score_Fondamental_0_10'] if c in df_ratios.columns]
         csv_fund = df_ratios[cols_fund].to_csv(index=False).encode('utf-8')
-        st.download_button("📋 CSV Fondamentaux", csv_fund, "CFAOCI_fondamentaux.csv", "text/csv")
+        st.download_button("CSV Fondamentaux", csv_fund, "CFAOCI_fondamentaux.csv", "text/csv")
         
         # Résumé Markdown
         def resume_markdown(df_ratios: pd.DataFrame) -> str:
@@ -615,7 +615,7 @@ def main():
             return "\n".join(lines)
         
         md_text = resume_markdown(df_ratios)
-        st.download_button("📝 Résumé MD", md_text.encode('utf-8'), "CFAOCI_resume.md", "text/markdown")
+        st.download_button("Résumé MD", md_text.encode('utf-8'), "CFAOCI_resume.md", "text/markdown")
 
     # PIED DE PAGE
     st.markdown("---")
@@ -629,3 +629,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
