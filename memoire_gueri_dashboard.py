@@ -559,7 +559,7 @@ def main():
     col_analysis, col_downloads = st.columns([2, 1])
     
     with col_analysis:
-        st.subheader("Analyse Technique Auto")
+        st.subheader("🔍 Analyse Technique Auto")
         latest = df.iloc[-1]
         notes = []
         
@@ -629,4 +629,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
