@@ -369,11 +369,11 @@ def impute_fundamentals(df_fund: pd.DataFrame, assume_roe: float, assume_dte: fl
     return df
 
 def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
-    """Graphique résumé des fondamentaux avec espacement amélioré"""
+    """Graphique résumé des fondamentaux avec espacement correct pour éviter les chevauchements"""
     fig = make_subplots(
         rows=2, cols=2, 
         subplot_titles=['Chiffre d\'affaires & Résultat Net', 'Price Earnings Ratio (PER)', 'Return on Equity (ROE %)', 'Score Fondamental'],
-        vertical_spacing=0.15, horizontal_spacing=0.12,
+        vertical_spacing=0.25, horizontal_spacing=0.18,  # Espacement augmenté
         specs=[[{"secondary_y": False}, {"secondary_y": False}],
                [{"secondary_y": False}, {"secondary_y": False}]]
     )
@@ -385,8 +385,8 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
             y=df_ratios['revenue'], 
             name='Chiffre d\'affaires', 
             mode='lines+markers',
-            line=dict(color='#1f77b4', width=3),
-            marker=dict(size=8)
+            line=dict(color='#1f77b4', width=2),
+            marker=dict(size=6)
         ), row=1, col=1)
     
     if 'net_income' in df_ratios.columns:
@@ -395,8 +395,8 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
             y=df_ratios['net_income'], 
             name='Résultat Net', 
             mode='lines+markers',
-            line=dict(color='#ff7f0e', width=3),
-            marker=dict(size=8)
+            line=dict(color='#ff7f0e', width=2),
+            marker=dict(size=6)
         ), row=1, col=1)
     
     # PER avec zone de valorisation raisonnable
@@ -407,19 +407,14 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
             y=dfp['PER'], 
             name='PER', 
             mode='lines+markers',
-            line=dict(color='#2ca02c', width=3),
-            marker=dict(size=8)
+            line=dict(color='#2ca02c', width=2),
+            marker=dict(size=6)
         ), row=1, col=2)
         
         # Zone de valorisation raisonnable (PER entre 10-20)
         fig.add_hrect(y0=10, y1=20, 
                       fillcolor="lightgreen", opacity=0.1, 
                       line_width=0, row=1, col=2)
-        
-        # Annotations pour les zones
-        fig.add_annotation(x=dfp['period'].iloc[-1], y=15, 
-                          text="Zone raisonnable", showarrow=False, 
-                          font=dict(size=10, color="green"), row=1, col=2)
     
     # ROE avec seuils de performance
     if 'ROE_%' in df_ratios.columns:
@@ -430,8 +425,8 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
                 y=dfr['ROE_%'], 
                 name='ROE (%)', 
                 mode='lines+markers',
-                line=dict(color='#d62728', width=3),
-                marker=dict(size=8)
+                line=dict(color='#d62728', width=2),
+                marker=dict(size=6)
             ), row=2, col=1)
             
             # Seuil de performance élevée (ROE > 15%)
@@ -439,12 +434,6 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
                          opacity=0.6, row=2, col=1)
             fig.add_hline(y=8, line_dash="dot", line_color="orange", 
                          opacity=0.6, row=2, col=1)
-            
-            # Annotations
-            fig.add_annotation(x=dfr['period'].iloc[-1], y=15, 
-                              text="ROE élevé", showarrow=False, 
-                              font=dict(size=10, color="green"), 
-                              xshift=20, row=2, col=1)
     
     # Score avec code couleur
     if 'Score_Fondamental_0_10' in df_ratios.columns:
@@ -469,36 +458,42 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
                 marker_color=colors,
                 opacity=0.8,
                 text=dfs['Score_Fondamental_0_10'].round(1),
-                textposition='auto'
+                textposition='auto',
+                textfont=dict(size=10)
             ), row=2, col=2)
             
             # Ligne de référence pour score moyen
             fig.add_hline(y=5, line_dash="dash", line_color="gray", 
                          opacity=0.5, row=2, col=2)
     
-    # Mise à jour des axes avec titres plus clairs
-    fig.update_xaxes(title_text="Période", row=1, col=1)
-    fig.update_yaxes(title_text="Montants (FCFA)", row=1, col=1)
+    # Mise à jour des axes avec titres plus clairs et spacing
+    fig.update_xaxes(title_text="Période", title_font_size=10, row=1, col=1, tickfont_size=9)
+    fig.update_yaxes(title_text="Montants (FCFA)", title_font_size=10, row=1, col=1, tickfont_size=9)
     
-    fig.update_xaxes(title_text="Période", row=1, col=2)
-    fig.update_yaxes(title_text="PER (x)", row=1, col=2)
+    fig.update_xaxes(title_text="Période", title_font_size=10, row=1, col=2, tickfont_size=9)
+    fig.update_yaxes(title_text="PER (x)", title_font_size=10, row=1, col=2, tickfont_size=9)
     
-    fig.update_xaxes(title_text="Période", row=2, col=1)
-    fig.update_yaxes(title_text="ROE (%)", row=2, col=1)
+    fig.update_xaxes(title_text="Période", title_font_size=10, row=2, col=1, tickfont_size=9)
+    fig.update_yaxes(title_text="ROE (%)", title_font_size=10, row=2, col=1, tickfont_size=9)
     
-    fig.update_xaxes(title_text="Période", row=2, col=2)
-    fig.update_yaxes(title_text="Score (0-10)", range=[0, 10], row=2, col=2)
+    fig.update_xaxes(title_text="Période", title_font_size=10, row=2, col=2, tickfont_size=9)
+    fig.update_yaxes(title_text="Score (0-10)", title_font_size=10, range=[0, 10], row=2, col=2, tickfont_size=9)
     
-    # Layout général amélioré
+    # Layout général avec marges importantes pour éviter chevauchements
     fig.update_layout(
-        height=420, 
+        height=480,  # Hauteur augmentée
         showlegend=False, 
-        margin=dict(t=80, b=60, l=60, r=60),
+        margin=dict(t=100, b=80, l=80, r=80),  # Marges importantes
         plot_bgcolor='white',
         paper_bgcolor='white',
-        font=dict(size=11),
-        title_font_size=14
+        font=dict(size=9),
+        title_font_size=11
     )
+    
+    # Mise à jour des titres de sous-graphiques avec taille réduite
+    for annotation in fig['layout']['annotations']:
+        annotation['font'] = dict(size=11)
+        annotation['y'] = annotation['y'] + 0.02  # Décalage vers le haut
     
     # Grille légère pour tous les sous-graphiques
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
@@ -665,7 +660,7 @@ def main():
     col_analysis, col_downloads = st.columns([2, 1])
     
     with col_analysis:
-        st.subheader("🔍 Analyse Technique Auto")
+        st.subheader("Analyse Technique Auto")
         latest = df.iloc[-1]
         notes = []
         
