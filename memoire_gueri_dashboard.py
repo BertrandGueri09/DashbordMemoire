@@ -484,9 +484,9 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
         height=480,  # Hauteur augmentée
         showlegend=False, 
         margin=dict(t=100, b=80, l=80, r=80),  # Marges importantes
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        font=dict(size=9),
+        plot_bgcolor='#4a4a4a',  # Fond gris sombre
+        paper_bgcolor='#4a4a4a',  # Fond du papier gris sombre
+        font=dict(size=9, color='white'),  # Texte en blanc
         title_font_size=11
     )
     
@@ -543,7 +543,7 @@ def main():
     
     # SIDEBAR CONDENSÉ
     with st.sidebar:
-        st.header("Contrôles")
+        st.header("⚙Contrôles")
         
         # Données
         uploader = st.file_uploader("CSV Prix (opt.)", type=['csv'], key="price_csv")
@@ -600,7 +600,7 @@ def main():
         }
         
         # Style
-        st.subheader("Style")
+        st.subheader("🎨 Style")
         chart_type = st.radio("Type", ['Ligne', 'Chandelles'])
         rf = st.number_input("Taux sans risque (%)", value=2.0, step=0.5)
         
