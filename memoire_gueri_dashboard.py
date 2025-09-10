@@ -543,7 +543,7 @@ def main():
     
     # SIDEBAR CONDENSÉ
     with st.sidebar:
-        st.header("⚙Contrôles")
+        st.header("Contrôles")
         
         # Données
         uploader = st.file_uploader("CSV Prix (opt.)", type=['csv'], key="price_csv")
