@@ -22,6 +22,210 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+# Style CSS pour thème gris clair complet de l'application
+st.markdown("""
+<style>
+    /* Arrière-plan principal gris clair */
+    .main > div {
+        padding-top: 1.5rem;
+        padding-bottom: 1rem;
+    }
+    .stApp {
+        background-color: #f5f5f5;
+        color: #2c3e50;
+    }
+    
+    /* Container principal */
+    .block-container {
+        background-color: #f8f9fa;
+        padding: 1.5rem 2rem;
+        border-radius: 8px;
+        border: 1px solid #dee2e6;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        max-width: 100%;
+    }
+    
+    /* Sidebar gris plus foncé */
+    .stSidebar > div {
+        background-color: #e9ecef;
+        border-right: 1px solid #ced4da;
+    }
+    
+    /* Headers et titres */
+    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+        color: #343a40 !important;
+        font-weight: 600;
+        background-color: rgba(233, 236, 239, 0.3);
+        padding: 0.5rem;
+        border-radius: 6px;
+        border-left: 4px solid #6c757d;
+    }
+    
+    /* Sous-titres */
+    .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {
+        color: #495057 !important;
+        background-color: rgba(248, 249, 250, 0.8);
+        padding: 0.3rem;
+        border-radius: 4px;
+    }
+    
+    /* Métriques avec fond gris clair */
+    div[data-testid="metric-container"] {
+        background-color: #e9ecef;
+        border: 1px solid #ced4da;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+    }
+    
+    div[data-testid="metric-container"] > div {
+        color: #343a40;
+    }
+    
+    div[data-testid="metric-container"] [data-testid="metric-value"] {
+        color: #495057;
+        font-weight: bold;
+    }
+    
+    /* Graphiques Plotly */
+    .stPlotlyChart {
+        border: 1px solid #ced4da;
+        border-radius: 8px;
+        padding: 12px;
+        background-color: #f8f9fa;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+    
+    /* Boutons */
+    .stButton > button {
+        background-color: #6c757d;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        padding: 0.5rem 1rem;
+    }
+    .stButton > button:hover {
+        background-color: #5a6268;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    
+    /* Download button */
+    .stDownloadButton > button {
+        background-color: #868e96;
+        color: white;
+        border: 1px solid #6c757d;
+        border-radius: 6px;
+    }
+    .stDownloadButton > button:hover {
+        background-color: #6c757d;
+    }
+    
+    /* Widgets de contrôle */
+    .stSelectbox > div > div {
+        background-color: #f8f9fa;
+        border: 1px solid #ced4da;
+    }
+    
+    .stMultiSelect > div > div {
+        background-color: #f8f9fa;
+        border: 1px solid #ced4da;
+    }
+    
+    .stSlider > div > div > div {
+        background-color: #e9ecef;
+    }
+    
+    .stDateInput > div > div {
+        background-color: #f8f9fa;
+        border: 1px solid #ced4da;
+    }
+    
+    .stNumberInput > div > div {
+        background-color: #f8f9fa;
+        border: 1px solid #ced4da;
+    }
+    
+    .stRadio > div {
+        background-color: rgba(233, 236, 239, 0.3);
+        padding: 0.5rem;
+        border-radius: 6px;
+    }
+    
+    /* Expander */
+    .streamlit-expander {
+        border: 1px solid #ced4da;
+        border-radius: 6px;
+        background-color: #f8f9fa;
+    }
+    
+    .streamlit-expander > summary {
+        background-color: #e9ecef;
+        color: #495057;
+    }
+    
+    /* Info boxes */
+    .stInfo {
+        background-color: #d1ecf1;
+        border: 1px solid #bee5eb;
+        border-radius: 6px;
+        color: #0c5460;
+    }
+    
+    /* Success boxes */
+    .stSuccess {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+    }
+    
+    /* Error boxes */
+    .stError {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+    }
+    
+    /* Text content */
+    .stMarkdown {
+        color: #495057;
+    }
+    
+    /* Colonnes et spacing */
+    .element-container {
+        margin-bottom: 1rem;
+    }
+    
+    /* File uploader */
+    .stFileUploader > div {
+        background-color: #f8f9fa;
+        border: 2px dashed #ced4da;
+        border-radius: 8px;
+    }
+    
+    /* Text areas */
+    .stTextArea > div > div {
+        background-color: #f8f9fa;
+        border: 1px solid #ced4da;
+    }
+    
+    /* Sidebar elements */
+    .stSidebar .stSelectbox > div > div,
+    .stSidebar .stMultiSelect > div > div,
+    .stSidebar .stNumberInput > div > div,
+    .stSidebar .stDateInput > div > div {
+        background-color: #f8f9fa;
+        border: 1px solid #adb5bd;
+    }
+    
+    .stSidebar h1, .stSidebar h2, .stSidebar h3 {
+        color: #343a40 !important;
+        background-color: rgba(173, 181, 189, 0.2);
+        border-left: 4px solid #868e96;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 plt.style.use('seaborn-v0_8')
 sns.set_palette("husl")
 
@@ -31,7 +235,11 @@ def load_data(path_or_buffer: str | io.BytesIO) -> pd.DataFrame:
     """Charger et traiter les données CSV (prix)"""
     df = pd.read_csv(path_or_buffer)
     df.columns = df.columns.str.strip()
-    df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y', errors='coerce')
+    df['Date'] = pd.to_datetime(df['Date'], format='%Y-%m-%d', errors='coerce')
+    
+    # Si le format précédent échoue, essayer d/m/Y
+    if df['Date'].isna().any():
+        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y', errors='coerce')
 
     rename_map = {'Dernier': 'Close', 'Ouv.': 'Open', 'Plus Haut': 'High', 'Plus Bas': 'Low'}
     df = df.rename(columns=rename_map)
@@ -73,7 +281,22 @@ def load_data(path_or_buffer: str | io.BytesIO) -> pd.DataFrame:
 
     df = df.dropna(subset=['Date', 'Close', 'Open', 'High', 'Low'])
     df = df.sort_values('Date').reset_index(drop=True)
+    
+    # Validation des données OHLC
+    df = validate_ohlc_data(df)
+    
     return df
+
+def validate_ohlc_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Valider et corriger les données OHLC"""
+    # S'assurer que High >= max(Open, Close) et Low <= min(Open, Close)
+    df['High'] = df[['High', 'Open', 'Close']].max(axis=1)
+    df['Low'] = df[['Low', 'Open', 'Close']].min(axis=1)
+    
+    # Éliminer les lignes où High = Low = Open = Close (données invalides)
+    valid_mask = ~((df['High'] == df['Low']) & (df['Open'] == df['Close']) & (df['High'] == df['Open']))
+    
+    return df[valid_mask].reset_index(drop=True)
 
 def calculate_sma(prices: pd.Series, window: int) -> pd.Series:
     return prices.rolling(window=window, min_periods=1).mean()
@@ -105,17 +328,30 @@ def macd(prices: pd.Series, fast=12, slow=26, signal=9) -> Tuple[pd.Series, pd.S
     return macd_line, signal_line, hist
 
 def performance_metrics(df: pd.DataFrame, rf_annual_pct: float = 0.0) -> Dict[str, float | str]:
+    if df.empty:
+        return {}
+        
     latest = df.iloc[-1]
     oldest = df.iloc[0]
-    total_return = ((latest['Close'] - oldest['Close']) / oldest['Close']) * 100
-    n = len(df)
-    ann_return = ((latest['Close'] / oldest['Close']) ** (252 / max(n, 1)) - 1) * 100
+    
+    # Correction: éviter les divisions par zéro
+    if oldest['Close'] == 0:
+        total_return = 0.0
+        ann_return = 0.0
+    else:
+        total_return = ((latest['Close'] - oldest['Close']) / oldest['Close']) * 100
+        n = len(df)
+        if n > 1:
+            ann_return = ((latest['Close'] / oldest['Close']) ** (252 / max(n, 1)) - 1) * 100
+        else:
+            ann_return = 0.0
 
     daily_ret = df['Close'].pct_change().dropna()
-    vol = daily_ret.std() * np.sqrt(252) * 100
+    vol = daily_ret.std() * np.sqrt(252) * 100 if len(daily_ret) > 1 else 0.0
     rf_daily = (rf_annual_pct / 100) / 252
+    
     sharpe = 0.0
-    if daily_ret.std() > 0:
+    if len(daily_ret) > 1 and daily_ret.std() > 0:
         sharpe = ((daily_ret.mean() - rf_daily) / daily_ret.std()) * np.sqrt(252)
 
     cummax = df['Close'].cummax()
@@ -136,19 +372,43 @@ def performance_metrics(df: pd.DataFrame, rf_annual_pct: float = 0.0) -> Dict[st
     }
 
 def resample_ohlcv(df: pd.DataFrame, freq: str) -> pd.DataFrame:
-    dfi = df.set_index('Date')
-    agg = {
+    """Correction: rééchantillonnage correct selon la fréquence"""
+    if df.empty:
+        return df
+        
+    # Définir la colonne Date comme index
+    df_indexed = df.set_index('Date').copy()
+    
+    # Définir les agrégations OHLCV correctes
+    agg_dict = {
         'Open': 'first',
-        'High': 'max',
+        'High': 'max', 
         'Low': 'min',
         'Close': 'last',
         'Volume': 'sum',
         'Variation': 'mean'
     }
-    out = dfi.resample(freq).agg(agg).dropna().reset_index()
-    return out
+    
+    # Appliquer le rééchantillonnage
+    try:
+        resampled = df_indexed.resample(freq).agg(agg_dict).dropna()
+        
+        # Si pas de données après rééchantillonnage, retourner l'original
+        if resampled.empty:
+            return df
+            
+        # Recalculer la variation pour la nouvelle fréquence
+        resampled['Variation'] = resampled['Close'].pct_change() * 100
+        
+        return resampled.reset_index()
+    except Exception:
+        # En cas d'erreur, retourner les données originales
+        return df
 
 def add_indicators(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
+    if df.empty:
+        return df
+        
     df = df.copy()
     if params.get('show_sma'):
         df['SMA_1'] = calculate_sma(df['Close'], params['sma1'])
@@ -166,36 +426,48 @@ def add_indicators(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
     return df
 
 def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go.Figure:
-    """Graphique combiné avec indicateurs dans des sous-graphiques"""
+    """Graphique amélioré avec chandelles correctes et volume"""
+    if df.empty:
+        return go.Figure()
+        
     # Déterminer le nombre de lignes nécessaires
-    rows = 1
+    rows = 2  # Prix principal + Volume
     if params.get('show_rsi'): rows += 1
     if params.get('show_macd'): rows += 1
     
     # Hauteurs relatives
-    if rows == 1:
-        row_heights = [1.0]
-    elif rows == 2:
+    if rows == 2:
         row_heights = [0.7, 0.3]
-    else:
+    elif rows == 3:
         row_heights = [0.6, 0.2, 0.2]
+    else:
+        row_heights = [0.5, 0.15, 0.15, 0.2]
     
     fig = make_subplots(
-        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.02,
+        rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.03,
         row_heights=row_heights,
-        subplot_titles=['Prix & Volume'] + 
+        subplot_titles=['Prix'] + 
+                      (['Volume'] if rows >= 2 else []) +
                       (['RSI'] if params.get('show_rsi') else []) + 
                       (['MACD'] if params.get('show_macd') else [])
     )
     
     current_row = 1
     
-    # Prix principal
+    # Prix principal avec chandelles correctes
     if chart_type == 'Chandelles':
         fig.add_trace(
             go.Candlestick(
-                x=df['Date'], open=df['Open'], high=df['High'],
-                low=df['Low'], close=df['Close'], name='Cours'
+                x=df['Date'], 
+                open=df['Open'], 
+                high=df['High'],
+                low=df['Low'], 
+                close=df['Close'], 
+                name='CFAOCI',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350',
+                increasing_fillcolor='#26a69a',
+                decreasing_fillcolor='#ef5350'
             ), row=current_row, col=1
         )
     else:
@@ -206,17 +478,22 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
     
     # Moyennes mobiles
     if params.get('show_sma'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_1'], name=f"MM{params['sma1']}", mode='lines'), row=current_row, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_2'], name=f"MM{params['sma2']}", mode='lines'), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_1'], name=f"MM{params['sma1']}", mode='lines', line=dict(width=1)), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_2'], name=f"MM{params['sma2']}", mode='lines', line=dict(width=1)), row=current_row, col=1)
     if params.get('show_ema'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_1'], name=f"EMA{params['ema1']}", mode='lines'), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_1'], name=f"EMA{params['ema1']}", mode='lines', line=dict(width=1)), row=current_row, col=1)
     
     # Bandes de Bollinger
     if params.get('show_bb'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_M'], name="BB", mode='lines', line=dict(dash='dot')), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_M'], name="BB Moy", mode='lines', line=dict(dash='dot', width=1)), row=current_row, col=1)
         fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_U'], mode='lines', line=dict(width=0), showlegend=False), row=current_row, col=1)
         fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_L'], fill='tonexty', mode='lines', line=dict(width=0), name='BB Zone', opacity=0.1), row=current_row, col=1)
     
+    current_row += 1
+    
+    # Volume (toujours affiché)
+    colors = ['green' if close >= open else 'red' for close, open in zip(df['Close'], df['Open'])]
+    fig.add_trace(go.Bar(x=df['Date'], y=df['Volume'], name='Volume', marker_color=colors, opacity=0.6), row=current_row, col=1)
     current_row += 1
     
     # RSI
@@ -231,14 +508,94 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
     if params.get('show_macd'):
         fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_L'], name='MACD', mode='lines'), row=current_row, col=1)
         fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_S'], name='Signal', mode='lines'), row=current_row, col=1)
-        fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.6), row=current_row, col=1)
+        fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Histogramme', opacity=0.6), row=current_row, col=1)
     
     fig.update_layout(
-        height=550, hovermode='x unified', showlegend=True,
+        height=600, 
+        hovermode='x unified', 
+        showlegend=True,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-        margin=dict(t=40, b=40, l=40, r=40)
+        margin=dict(t=50, b=40, l=40, r=40),
+        xaxis_rangeslider_visible=False  # Masquer le range slider pour plus de place
     )
+    
+    # Mise à jour des axes Y
+    fig.update_yaxes(title_text="Prix (FCFA)", row=1, col=1)
+    fig.update_yaxes(title_text="Volume", row=2, col=1)
+    if params.get('show_rsi'):
+        fig.update_yaxes(title_text="RSI", range=[0, 100], row=3, col=1)
+    if params.get('show_macd'):
+        row_macd = 4 if params.get('show_rsi') else 3
+        fig.update_yaxes(title_text="MACD", row=row_macd, col=1)
+    
     return fig
+
+def simple_backtest(df: pd.DataFrame, strategy_type: str = "sma_cross") -> Dict:
+    """Backtest simple basé sur le croisement des moyennes mobiles"""
+    if len(df) < 50:
+        return {"error": "Pas assez de données pour le backtest"}
+    
+    # Ajouter les moyennes mobiles
+    df = df.copy()
+    df['SMA_20'] = calculate_sma(df['Close'], 20)
+    df['SMA_50'] = calculate_sma(df['Close'], 50)
+    
+    # Signaux de trading
+    df['Signal'] = 0
+    df['Signal'][20:] = np.where(df['SMA_20'][20:] > df['SMA_50'][20:], 1, 0)
+    df['Position'] = df['Signal'].diff()
+    
+    # Calcul des trades
+    trades = []
+    position = 0
+    entry_price = 0
+    
+    for i, row in df.iterrows():
+        if row['Position'] == 1:  # Signal d'achat
+            if position == 0:
+                entry_price = row['Close']
+                position = 1
+                trades.append({
+                    'date': row['Date'],
+                    'type': 'BUY',
+                    'price': entry_price,
+                    'return': 0
+                })
+        elif row['Position'] == -1:  # Signal de vente
+            if position == 1:
+                exit_price = row['Close']
+                trade_return = (exit_price - entry_price) / entry_price * 100
+                trades.append({
+                    'date': row['Date'],
+                    'type': 'SELL',
+                    'price': exit_price,
+                    'return': trade_return
+                })
+                position = 0
+    
+    # Statistiques du backtest
+    if trades:
+        returns = [t['return'] for t in trades if t['return'] != 0]
+        winning_trades = [r for r in returns if r > 0]
+        losing_trades = [r for r in returns if r < 0]
+        
+        total_return = sum(returns)
+        win_rate = len(winning_trades) / len(returns) * 100 if returns else 0
+        avg_win = np.mean(winning_trades) if winning_trades else 0
+        avg_loss = np.mean(losing_trades) if losing_trades else 0
+        
+        return {
+            'total_trades': len([t for t in trades if t['return'] != 0]),
+            'winning_trades': len(winning_trades),
+            'losing_trades': len(losing_trades),
+            'win_rate': win_rate,
+            'total_return': total_return,
+            'avg_win': avg_win,
+            'avg_loss': avg_loss,
+            'trades': trades[-10:]  # Les 10 derniers trades
+        }
+    else:
+        return {"error": "Aucun signal généré"}
 
 # --------------------------- FONDAMENTAUX ---------------------------
 @st.cache_data
@@ -286,7 +643,7 @@ def _fit_yearly_trend_impute(df: pd.DataFrame, col: str) -> pd.Series:
     return out
 
 def impute_fundamentals(df_fund: pd.DataFrame, assume_roe: float, assume_dte: float, last_close: float) -> pd.DataFrame:
-    """Complète les NaN avec des hypothèses raisonnables"""
+    """Complète les NaN avec des hypothèses raisonnables - Version corrigée"""
     df = df_fund.copy()
     df['period'] = df['period'].astype(str)
 
@@ -303,26 +660,45 @@ def impute_fundamentals(df_fund: pd.DataFrame, assume_roe: float, assume_dte: fl
     if {'net_income', 'shares_outstanding'} <= set(df.columns):
         df['EPS'] = df['EPS'].where(df['EPS'].notna(), df['net_income'] / df['shares_outstanding'])
 
-    df['PER'] = last_close / df['EPS'].replace(0, np.nan)
+    # Correction PER : éviter les divisions par zéro et les valeurs aberrantes
+    df['PER'] = np.where(
+        (df['EPS'] > 0) & (last_close > 0), 
+        last_close / df['EPS'], 
+        np.nan
+    )
+    # Limiter les PER extrêmes (entre 1 et 100)
+    df['PER'] = np.where((df['PER'] < 1) | (df['PER'] > 100), np.nan, df['PER'])
 
     if {'dividend_per_share', 'shares_outstanding'} <= set(df.columns):
         if 'dividends_total' not in df.columns:
             df['dividends_total'] = np.nan
-        df['dividends_total'] = df['dividends_total'].where(df['dividends_total'].notna(), df['dividend_per_share'] * df['shares_outstanding'])
+        df['dividends_total'] = df['dividends_total'].where(
+            df['dividends_total'].notna(),
+            df['dividend_per_share'] * df['shares_outstanding']
+        )
 
     if 'total_equity' not in df.columns:
         df['total_equity'] = np.nan
     if 'net_income' in df.columns:
-        roe = max(assume_roe, 1e-6)
-        df['total_equity'] = df['total_equity'].where(df['total_equity'].notna(), df['net_income'] / roe)
+        roe = max(assume_roe, 0.01)  # Minimum 1%
+        df['total_equity'] = df['total_equity'].where(
+            df['total_equity'].notna(),
+            df['net_income'] / roe
+        )
 
     if 'total_debt' not in df.columns:
         df['total_debt'] = np.nan
-    df['total_debt'] = df['total_debt'].where(df['total_debt'].notna(), assume_dte * df['total_equity'])
+    df['total_debt'] = df['total_debt'].where(
+        df['total_debt'].notna(),
+        assume_dte * df['total_equity']
+    )
 
     if 'total_assets' not in df.columns:
         df['total_assets'] = np.nan
-    df['total_assets'] = df['total_assets'].where(df['total_assets'].notna(), df['total_equity'] + df['total_debt'])
+    df['total_assets'] = df['total_assets'].where(
+        df['total_assets'].notna(),
+        df['total_equity'] + df['total_debt']
+    )
 
     for c in ['cash_and_equivalents', 'capex']:
         if c not in df.columns:
@@ -330,10 +706,30 @@ def impute_fundamentals(df_fund: pd.DataFrame, assume_roe: float, assume_dte: fl
         else:
             df[c] = df[c].fillna(0.0)
 
-    df['Dividend_Yield_%'] = 100 * df['dividend_per_share'] / last_close
-    df['ROE_%'] = 100 * df['net_income'] / df['total_equity'].replace(0, np.nan)
-    df['Debt_to_Equity'] = df['total_debt'] / df['total_equity'].replace(0, np.nan)
-    df['Payout_%'] = 100 * df['dividends_total'] / df['net_income'].replace(0, np.nan)
+    # Correction des ratios avec validation
+    df['Dividend_Yield_%'] = np.where(
+        last_close > 0,
+        100 * df['dividend_per_share'] / last_close,
+        0
+    )
+    
+    df['ROE_%'] = np.where(
+        df['total_equity'] > 0,
+        100 * df['net_income'] / df['total_equity'],
+        np.nan
+    )
+    
+    df['Debt_to_Equity'] = np.where(
+        df['total_equity'] > 0,
+        df['total_debt'] / df['total_equity'],
+        np.nan
+    )
+    
+    df['Payout_%'] = np.where(
+        df['net_income'] > 0,
+        100 * df['dividends_total'] / df['net_income'],
+        np.nan
+    )
 
     def score_row(r):
         score = 0
@@ -373,7 +769,7 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
     fig = make_subplots(
         rows=2, cols=2, 
         subplot_titles=['Chiffre d\'affaires & Résultat Net', 'Price Earnings Ratio (PER)', 'Return on Equity (ROE %)', 'Score Fondamental'],
-        vertical_spacing=0.25, horizontal_spacing=0.18,  # Espacement augmenté
+        vertical_spacing=0.25, horizontal_spacing=0.18,
         specs=[[{"secondary_y": False}, {"secondary_y": False}],
                [{"secondary_y": False}, {"secondary_y": False}]]
     )
@@ -481,9 +877,9 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
     
     # Layout général avec marges importantes pour éviter chevauchements
     fig.update_layout(
-        height=480,  # Hauteur augmentée
+        height=480,
         showlegend=False, 
-        margin=dict(t=100, b=80, l=80, r=80),  # Marges importantes
+        margin=dict(t=100, b=80, l=80, r=80),
         plot_bgcolor='#4a4a4a',  # Fond gris sombre
         paper_bgcolor='#4a4a4a',  # Fond du papier gris sombre
         font=dict(size=9, color='white'),  # Texte en blanc
@@ -492,12 +888,12 @@ def plot_fundamentals_summary(df_ratios: pd.DataFrame) -> go.Figure:
     
     # Mise à jour des titres de sous-graphiques avec taille réduite
     for annotation in fig['layout']['annotations']:
-        annotation['font'] = dict(size=11)
-        annotation['y'] = annotation['y'] + 0.02  # Décalage vers le haut
+        annotation['font'] = dict(size=11, color='white')
+        annotation['y'] = annotation['y'] + 0.02
     
     # Grille légère pour tous les sous-graphiques
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#f0f0f0')
+    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#666666')
+    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#666666')
     
     return fig
 
@@ -541,9 +937,18 @@ def main():
     st.title("Dashboard CFAOCI - BRVM")
     st.markdown("**Analyse technique et fondamentale de CFAO CI**")
     
+    # Alertes de données
+    with st.expander("⚠️ Avis Important sur les Données", expanded=False):
+        st.warning("""
+        **Important :** Ce dashboard utilise des données de démonstration. Pour un usage professionnel :
+        - Vérifiez la concordance des prix avec les sources officielles BRVM
+        - Les données fondamentales sont partiellement estimées
+        - Consultez toujours des sources officielles avant toute décision d'investissement
+        """)
+    
     # SIDEBAR CONDENSÉ
     with st.sidebar:
-        st.header("⚙Contrôles")
+        st.header("Contrôles")
         
         # Données
         uploader = st.file_uploader("CSV Prix (opt.)", type=['csv'], key="price_csv")
@@ -553,8 +958,12 @@ def main():
             try:
                 df = load_data('CFAOCI.csv')
             except Exception:
-                st.error("❌ Impossible de charger les données")
+                st.error("Impossible de charger les données par défaut. Veuillez importer un fichier CSV.")
                 st.stop()
+        
+        if df.empty:
+            st.error("Les données chargées sont vides.")
+            st.stop()
         
         # Période
         st.subheader("Période")
@@ -564,13 +973,23 @@ def main():
         min_date, max_date = df['Date'].min().date(), df['Date'].max().date()
         date_range = st.date_input("Dates", value=(min_date, max_date), min_value=min_date, max_value=max_date)
         
-        if isinstance(date_range, tuple):
-            start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1]) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        if isinstance(date_range, tuple) and len(date_range) == 2:
+            start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
         else:
             start_date, end_date = pd.to_datetime(min_date), pd.to_datetime(max_date)
         
-        df = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
-        df = resample_ohlcv(df, freq_map[freq])
+        # Filtrage par date
+        df_filtered = df[(df['Date'] >= start_date) & (df['Date'] <= end_date)]
+        
+        # Rééchantillonnage selon la fréquence
+        df_resampled = resample_ohlcv(df_filtered, freq_map[freq])
+        
+        if df_resampled.empty:
+            st.error("Aucune donnée disponible pour la période sélectionnée.")
+            st.stop()
+        
+        # Affichage info période
+        st.info(f"Période : {len(df_resampled)} {freq.lower()}s du {df_resampled['Date'].min().strftime('%d/%m/%Y')} au {df_resampled['Date'].max().strftime('%d/%m/%Y')}")
         
         # Indicateurs
         st.subheader("Indicateurs")
@@ -600,9 +1019,13 @@ def main():
         }
         
         # Style
-        st.subheader("🎨 Style")
+        st.subheader("Style")
         chart_type = st.radio("Type", ['Ligne', 'Chandelles'])
         rf = st.number_input("Taux sans risque (%)", value=2.0, step=0.5)
+        
+        # Backtest
+        st.subheader("Backtest")
+        run_backtest = st.checkbox("Activer le backtest (MM 20/50)")
         
         # Fondamentaux
         st.subheader("Fondamentaux")
@@ -614,8 +1037,8 @@ def main():
             assume_dte = st.slider("D/E", 0.0, 2.0, 0.60, 0.05)
 
     # TRAITEMENT DES DONNÉES
-    df = add_indicators(df, params)
-    metrics = performance_metrics(df, rf_annual_pct=rf)
+    df_final = add_indicators(df_resampled, params)
+    metrics = performance_metrics(df_final, rf_annual_pct=rf)
     
     if fund_uploader is not None:
         try:
@@ -625,25 +1048,26 @@ def main():
     else:
         df_fund = fundamentals_default_df()
     
-    last_close = float(metrics['current_price'])
+    last_close = float(metrics['current_price']) if 'current_price' in metrics else 660.0
     df_ratios = impute_fundamentals(df_fund, assume_roe=assume_roe_pct/100.0, assume_dte=assume_dte, last_close=last_close)
 
     # MÉTRIQUES
     st.subheader("Métriques Principales")
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
-    col1.metric("Prix Actuel", f"{metrics['current_price']:.0f} FCFA")
-    col2.metric("Rendement Total", f"{metrics['total_return']:.1f}%")
-    col3.metric("Rend. Annualisé", f"{metrics['annualized_return']:.1f}%")
-    col4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
-    col5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
-    col6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
+    if metrics:
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+        col1.metric("Prix Actuel", f"{metrics['current_price']:.0f} FCFA")
+        col2.metric("Rendement Total", f"{metrics['total_return']:.1f}%")
+        col3.metric("Rend. Annualisé", f"{metrics['annualized_return']:.1f}%")
+        col4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
+        col5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
+        col6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
 
     # LAYOUT PRINCIPAL EN COLONNES
     col_left, col_right = st.columns([3, 2])
     
     with col_left:
         st.subheader("Graphique Principal")
-        main_fig = plotly_combined_chart(df, chart_type, params)
+        main_fig = plotly_combined_chart(df_final, chart_type, params)
         st.plotly_chart(main_fig, use_container_width=True, config={"displaylogo": False})
     
     with col_right:
@@ -656,43 +1080,65 @@ def main():
         for note in commentaire_auto_points(df_ratios):
             st.write(f"• {note}")
 
-    # ANALYSE TECHNIQUE AUTO + TÉLÉCHARGEMENTS
+    # BACKTEST ET ANALYSE
     col_analysis, col_downloads = st.columns([2, 1])
     
     with col_analysis:
         st.subheader("Analyse Technique Auto")
-        latest = df.iloc[-1]
-        notes = []
         
-        if 'RSI' in df.columns:
-            rsi_value = float(latest['RSI'])
-            if rsi_value > 70:
-                notes.append(f"**RSI:** Surachat ({rsi_value:.1f})")
-            elif rsi_value < 30:
-                notes.append(f"**RSI:** Survente ({rsi_value:.1f})")
+        # Backtest si activé
+        if run_backtest and len(df_final) >= 50:
+            backtest_results = simple_backtest(df_final)
+            if 'error' not in backtest_results:
+                st.success("**Résultats du Backtest (MM 20/50) :**")
+                col_bt1, col_bt2, col_bt3 = st.columns(3)
+                with col_bt1:
+                    st.metric("Total Trades", backtest_results['total_trades'])
+                    st.metric("Trades Gagnants", backtest_results['winning_trades'])
+                with col_bt2:
+                    st.metric("Taux de Réussite", f"{backtest_results['win_rate']:.1f}%")
+                    st.metric("Rendement Total", f"{backtest_results['total_return']:.2f}%")
+                with col_bt3:
+                    st.metric("Gain Moyen", f"{backtest_results['avg_win']:.2f}%")
+                    st.metric("Perte Moyenne", f"{backtest_results['avg_loss']:.2f}%")
             else:
-                notes.append(f"**RSI:** Neutre ({rsi_value:.1f})")
+                st.warning(f"Backtest: {backtest_results['error']}")
         
-        if 'SMA_1' in df.columns and 'SMA_2' in df.columns:
-            cond_up = latest['Close'] > latest['SMA_1'] > latest['SMA_2']
-            cond_down = latest['Close'] < latest['SMA_1'] < latest['SMA_2']
-            if cond_up:
-                notes.append("**Tendance:** Haussière forte")
-            elif cond_down:
-                notes.append("**Tendance:** Baissière forte")
-            else:
-                notes.append("**Tendance:** Neutre/Consolidation")
+        # Signaux techniques
+        if not df_final.empty:
+            latest = df_final.iloc[-1]
+            notes = []
+            
+            if 'RSI' in df_final.columns:
+                rsi_value = float(latest['RSI'])
+                if rsi_value > 70:
+                    notes.append(f"**RSI:** Surachat ({rsi_value:.1f})")
+                elif rsi_value < 30:
+                    notes.append(f"**RSI:** Survente ({rsi_value:.1f})")
+                else:
+                    notes.append(f"**RSI:** Neutre ({rsi_value:.1f})")
+            
+            if 'SMA_1' in df_final.columns and 'SMA_2' in df_final.columns:
+                cond_up = latest['Close'] > latest['SMA_1'] > latest['SMA_2']
+                cond_down = latest['Close'] < latest['SMA_1'] < latest['SMA_2']
+                if cond_up:
+                    notes.append("**Tendance:** Haussière forte")
+                elif cond_down:
+                    notes.append("**Tendance:** Baissière forte")
+                else:
+                    notes.append("**Tendance:** Neutre/Consolidation")
+            
+            for note in notes:
+                st.write(f"• {note}")
         
-        for note in notes:
-            st.write(f"• {note}")
-        
-        st.info(f"**Min/Max période:** {df['Close'].min():.0f} - {df['Close'].max():.0f} FCFA | **Sessions:** {len(df)} | **Dernière MAJ:** {metrics['last_update']}")
+        if metrics:
+            st.info(f"**Min/Max période:** {df_final['Close'].min():.0f} - {df_final['Close'].max():.0f} FCFA | **Sessions:** {len(df_final)} | **Dernière MAJ:** {metrics['last_update']}")
     
     with col_downloads:
         st.subheader("Téléchargements")
         
         # CSV Prix filtrés
-        display_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Variation']].copy()
+        display_df = df_final[['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Variation']].copy()
         display_df['Date'] = display_df['Date'].dt.strftime('%d/%m/%Y')
         csv_prix = display_df.to_csv(index=False).encode('utf-8')
         st.download_button("CSV Prix", csv_prix, "CFAOCI_prix.csv", "text/csv")
@@ -701,6 +1147,15 @@ def main():
         cols_fund = [c for c in ['period', 'revenue', 'net_income', 'EPS', 'PER', 'ROE_%', 'Debt_to_Equity', 'Dividend_Yield_%', 'Score_Fondamental_0_10'] if c in df_ratios.columns]
         csv_fund = df_ratios[cols_fund].to_csv(index=False).encode('utf-8')
         st.download_button("CSV Fondamentaux", csv_fund, "CFAOCI_fondamentaux.csv", "text/csv")
+        
+        # Backtest results si disponible
+        if run_backtest and len(df_final) >= 50:
+            backtest_results = simple_backtest(df_final)
+            if 'error' not in backtest_results and 'trades' in backtest_results:
+                trades_df = pd.DataFrame(backtest_results['trades'])
+                if not trades_df.empty:
+                    csv_backtest = trades_df.to_csv(index=False).encode('utf-8')
+                    st.download_button("CSV Backtest", csv_backtest, "CFAOCI_backtest.csv", "text/csv")
         
         # Résumé Markdown
         def resume_markdown(df_ratios: pd.DataFrame) -> str:
@@ -712,7 +1167,7 @@ def main():
             lines += [f"## Période {p}", ""]
             for msg in commentaire_auto_points(df_ratios):
                 lines += [f"- {msg.replace('**', '')}"]
-            lines += ["", "> *Analyse indicative*"]
+            lines += ["", "> *Analyse indicative - Vérifiez avec les sources officielles*"]
             return "\n".join(lines)
         
         md_text = resume_markdown(df_ratios)
@@ -723,7 +1178,8 @@ def main():
     st.markdown(
         """
         <div style='text-align: center; color: #666; font-size: 0.9em;'>
-            <strong>Dashboard CFAOCI - BRVM</strong> | Analyse technique & fondamentale
+            <strong>Dashboard CFAOCI - BRVM</strong> | Analyse technique & fondamentale<br/>
+            <em>Version corrigée avec validation des données et backtest</em>
         </div>
         """, unsafe_allow_html=True
     )
