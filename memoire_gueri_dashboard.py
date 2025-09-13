@@ -7,9 +7,10 @@
 # - Fondamentaux de marché recalculés AUTOMATIQUEMENT sur la plage d'années
 #   effectivement présente dans le CSV importé (pas de bornes fixes)
 # - Accès robuste à la colonne des années (Annee/Année/Year/index)
-# - Affichage SANS tableau des fondamentaux : résumé + bouton de téléchargement
-# - NOUVEAU : intégration Dividendes (DPS) & EPS/Net Income (fichiers ou entrées manuelles)
+# - Résumé fondamental + bouton de téléchargement (pas de tableau brut)
+# - Intégration Dividendes (DPS) & EPS/Net Income (fichiers ou entrées manuelles)
 #   -> calcule Dividend Yield, Dividendes totaux, PER de la dernière année
+# - NOUVEAU : Graphe “Dividend Yield & PER par année” (si dispo)
 # -------------------------------------------------------------
 
 import streamlit as st
@@ -39,7 +40,7 @@ DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
     """
     Détecte la colonne année dans df parmi :
-    'Annee', 'Année', 'Year', 'year' ou un index numérique.
+    'Annee', 'Année', 'Year', 'year', 'period' ou un index numérique.
     Si rien trouvé, renvoie None.
     """
     if df is None or df.empty:
@@ -258,6 +259,7 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
     # MM / EMA
     if params.get('show_sma'):
         fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_1'], name=f"MM{params['sma1']}", mode='lines'), row=1, col=1)
+    if params.get('show_sma'):
         fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_2'], name=f"MM{params['sma2']}", mode='lines'), row=1, col=1)
     if params.get('show_ema'):
         fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_1'], name=f"EMA{params['ema1']}", mode='lines'), row=1, col=1)
@@ -537,21 +539,20 @@ def _parse_year_value_df(uploaded: io.BytesIO, value_cols_candidates: List[str])
     df.columns = df.columns.str.strip()
     year_col = _detect_year_column(df)
     if not year_col:
-        # essayer 'period'
         if 'period' in df.columns:
             df.rename(columns={'period': 'Annee'}, inplace=True)
             year_col = 'Annee'
         else:
             return None
 
-    # garder colonnes utiles
+    # chercher colonne de valeur
     candidate = None
     for c in value_cols_candidates:
         if c in df.columns:
             candidate = c
             break
     if candidate is None:
-        # tenter insensible à la casse
+        # insensible à la casse
         cols_lower = {c.lower(): c for c in df.columns}
         for c in value_cols_candidates:
             if c.lower() in cols_lower:
@@ -562,7 +563,6 @@ def _parse_year_value_df(uploaded: io.BytesIO, value_cols_candidates: List[str])
 
     out = df[[year_col, candidate]].copy()
     out.rename(columns={year_col: 'Annee', candidate: candidate}, inplace=True)
-    # convertir
     out['Annee'] = pd.to_numeric(out['Annee'], errors='coerce').astype('Int64')
     out[candidate] = pd.to_numeric(out[candidate], errors='coerce')
     out = out.dropna(subset=['Annee'])
@@ -579,12 +579,6 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame,
       - DPS (si dps_df ou manuel)
       - EPS (si eps_df ou net_income/shares ou estimé via DPS & payout)
       - Dividend Yield (%), Dividends Total (FCFA), PER
-    Règles :
-      1) Fusion par 'Annee' si dps_df / eps_or_net_df fournis
-      2) Si EPS absent mais net_income présent -> EPS = net_income / shares
-      3) Si EPS encore absent ET (manual_dps & manual_payout) fournis : EPS_last = manual_dps / (payout)
-      4) PER = last_price / EPS (année par année si EPS disponible pour cette année)
-      5) Dividend_Yield_% = DPS / last_price * 100 (année par année si DPS dispo)
     """
     if ann_df is None or ann_df.empty:
         return ann_df
@@ -592,24 +586,20 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame,
 
     # DPS merge
     if dps_df is not None and not dps_df.empty:
-        # normaliser nom de col de valeur -> 'DPS'
         val_col = [c for c in dps_df.columns if c.lower() in ['dps','dividend_per_share','dividende','dividendes','dividende_par_action']]
         if val_col:
             dps_df = dps_df.rename(columns={val_col[0]: 'DPS'})
         elif 'DPS' not in dps_df.columns:
-            # Si déjà uniquement 2 colonnes, prendre la 2e
             if dps_df.shape[1] == 2:
                 other = [c for c in dps_df.columns if c != 'Annee'][0]
                 dps_df = dps_df.rename(columns={other: 'DPS'})
             else:
-                # on abandonne
                 dps_df = None
         if dps_df is not None:
             out = out.merge(dps_df[['Annee','DPS']], on='Annee', how='left')
 
     # EPS / Net income merge
     if eps_or_net_df is not None and not eps_or_net_df.empty:
-        # détecter colonne EPS ou net_income
         eps_col = None
         net_col = None
         for c in eps_or_net_df.columns:
@@ -634,11 +624,10 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame,
             if 'EPS' not in out.columns and 'net_income' in out.columns:
                 out['EPS'] = out['net_income'] / float(shares_outstanding)
 
-    # EPS estimation via payout si toujours manquant pour la dernière année
     if 'EPS' not in out.columns:
         out['EPS'] = np.nan
 
-    # si on a un manual DPS & payout, estimer EPS sur la dernière année de la plage
+    # Estimation EPS via DPS & payout (dernière année) si besoin
     if manual_dps is not None and manual_payout_pct is not None and len(out) > 0:
         try:
             last_year = int(out['Annee'].max())
@@ -680,6 +669,49 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(title_text="%", row=2, col=1)
     fig.update_yaxes(title_text="Titres", row=2, col=2)
     fig.update_layout(height=520, showlegend=False, margin=dict(t=90, b=60, l=60, r=60))
+    return fig
+
+def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
+    """
+    Graphe complémentaire : Dividend Yield (%) et PER (x) par année.
+    Affiche uniquement les séries disponibles (s'il n'y a rien, renvoie None).
+    """
+    if ann_df is None or ann_df.empty:
+        return None
+    year_col = _detect_year_column(ann_df) or 'Annee'
+    x = ann_df[year_col]
+
+    has_yield = 'Dividend_Yield_%' in ann_df.columns and ann_df['Dividend_Yield_%'].notna().any()
+    has_per = 'PER' in ann_df.columns and ann_df['PER'].notna().any()
+    if not has_yield and not has_per:
+        return None
+
+    # 2 sous-graphiques : Dividend Yield (%) / PER (x)
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=['Dividend Yield (%)', 'PER (x)'],
+        shared_xaxes=False, vertical_spacing=0.10, horizontal_spacing=0.12
+    )
+
+    if has_yield:
+        dy = ann_df[['Dividend_Yield_%']].copy()
+        fig.add_trace(
+            go.Scatter(x=x, y=dy['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)'),
+            row=1, col=1
+        )
+        fig.update_yaxes(title_text="%", row=1, col=1)
+
+    if has_per:
+        pe = ann_df[['PER']].copy()
+        fig.add_trace(
+            go.Scatter(x=x, y=pe['PER'], mode='lines+markers', name='PER (x)'),
+            row=1, col=2
+        )
+        fig.update_yaxes(title_text="x", row=1, col=2)
+
+    fig.update_xaxes(title_text="Année", row=1, col=1)
+    fig.update_xaxes(title_text="Année", row=1, col=2)
+    fig.update_layout(height=360, showlegend=False, margin=dict(t=70, b=50, l=60, r=60))
     return fig
 
 def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
@@ -760,7 +792,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 
 # --------------------------- APP ---------------------------
 def main():
-    st.title("Dashboard des suivis des marchés boursiers - BRVM")
+    st.title("**Dashboard** SUIVIS de marchés boursiers-BRVM")
     with st.sidebar:
         st.header("Données")
         uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
@@ -843,7 +875,7 @@ def main():
             with colb4: mix_rsi_enter = st.slider("RSI entrée", 40, 70, 55, 1)
             with colb5: mix_rsi_exit = st.slider("RSI sortie", 20, 60, 45, 1)
 
-        # --------- NOUVEAU : Dividendes & Bénéfices (facultatif) ---------
+        # --------- Dividendes & Bénéfices (facultatif) ---------
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("CSV Dividendes par action (DPS) par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("CSV EPS (ou Résultat net) par année", type=['csv'], key="eps_csv")
@@ -865,7 +897,6 @@ def main():
     dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action']) if dps_uploader is not None else None
     eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit']) if eps_uploader is not None else None
 
-    # Nettoyage valeurs manuelles : rendre None si 0.0 (non saisi)
     manual_dps_val = manual_dps if manual_dps > 0 else None
     manual_payout_val = manual_payout if manual_payout > 0 else None
 
@@ -900,7 +931,12 @@ def main():
             fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
 
-            # Résumé court d'analyse fondamentale (exact, issu des calculs) – maintenant avec Dividend Yield & PER si dispo
+            # NOUVEAU : Graphe Dividend Yield & PER (si dispo)
+            extra_fig = plot_dividend_and_pe(ann_df)
+            if extra_fig is not None:
+                st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
+
+            # Résumé court d'analyse fondamentale
             st.markdown(summarize_fundamentals(ann_df))
 
             # Bouton de téléchargement uniquement
@@ -956,7 +992,7 @@ def main():
     st.info(
         "**À chaque nouveau CSV importé**, *les fondamentaux de marché sont recalculés* "
         "*sur* **toutes** *les années réellement présentes dans le fichier (plage dynamique).* "
-        "*Capitalisation = prix fin d’année × actions (paramétrable). DPS/EPS/Net income sont optionnels :* "
+        "**Capitalisation** = *prix fin d’année × actions (paramétrable). DPS/EPS/Net income sont optionnels :* "
         "*uploadez des CSV par année ou saisissez DPS + payout pour estimer l’EPS et le PER.* "
         "*Les backtests sont indicatifs.*"
     )
