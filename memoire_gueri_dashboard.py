@@ -37,10 +37,10 @@ st.set_page_config(
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
 # Emplacements par défaut
-DEFAULT_PRICE_PATH = "/mnt/data/CFAOCI_filtre.csv"
-DEFAULT_DPS_PATH = "/mnt/data/dps_exemple.csv"
-DEFAULT_EPS_PATH = "/mnt/data/eps_exemple.csv"
-DEFAULT_NET_PATH = "/mnt/data/net_income_exemple.csv"
+DEFAULT_PRICE_PATH = "CFAOCI_filtre.csv"
+DEFAULT_DPS_PATH = "dps_exemple.csv"
+DEFAULT_EPS_PATH = "eps_exemple.csv"
+DEFAULT_NET_PATH = "net_income_exemple.csv"
 
 # --------------------------- HELPERS ROBUSTES ---------------------------
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
@@ -675,7 +675,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 def main():
     st.title("Dashboard Marchés Boursiers - BRVM")
     with st.sidebar:
-        st.header("Données prix (par défaut si présent)")
+        st.header("Données prix")
         uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
 
         # Charger PRIX : d'abord upload, sinon fallback sur DEFAULT_PRICE_PATH
@@ -687,7 +687,7 @@ def main():
                 df_original = load_data(DEFAULT_PRICE_PATH)
                 st.info(f"Données de prix chargées par défaut : {DEFAULT_PRICE_PATH}")
             else:
-                st.error("Aucun fichier de prix. Importez un CSV de prix ou placez-le dans /mnt/data/CFAOCI_filtre.csv")
+                st.error("Aucun fichier de prix. Importez un CSV de prix")
                 st.stop()
 
         shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
@@ -779,7 +779,7 @@ def main():
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
-        st.info(f"ℹ️ DPS chargés par défaut : {DEFAULT_DPS_PATH}")
+        st.info(f"DPS chargés par défaut : {DEFAULT_DPS_PATH}")
     else:
         dps_df = None
 
@@ -787,10 +787,10 @@ def main():
         eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
     elif os.path.exists(DEFAULT_EPS_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_EPS_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"ℹ️ EPS chargés par défaut : {DEFAULT_EPS_PATH}")
+        st.info(f"EPS chargés par défaut : {DEFAULT_EPS_PATH}")
     elif os.path.exists(DEFAULT_NET_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_NET_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"ℹ️ Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
+        st.info(f"Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
     else:
         eps_or_net_df = None
 
@@ -887,3 +887,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
