@@ -635,6 +635,7 @@ def load_fundamentals(path_or_buffer: str | io.BytesIO) -> pd.DataFrame:
 def fundamentals_default_df() -> pd.DataFrame:
     """Données fondamentales par défaut avec corrections de cohérence"""
     data = [
+        ["2020",  99126, 3780, 181_371_900, np.nan, 22.15, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2021", 119731, 6711, 181_371_900, np.nan, 69.47, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2022", 146375, 5534, 181_371_900, np.nan, 28.67, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2023", 180162, 6399, 181_371_900, np.nan, 15.88, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
@@ -1200,3 +1201,4 @@ if __name__ == "__main__":
     main()# memoire_gueri_dashboard_interactif.py
         ["2020",  99126, 3780, 181_371_900, np.nan, 22.15, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2021", 119731, 6711
+
