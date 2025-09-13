@@ -635,7 +635,6 @@ def load_fundamentals(path_or_buffer: str | io.BytesIO) -> pd.DataFrame:
 def fundamentals_default_df() -> pd.DataFrame:
     """Données fondamentales par défaut avec corrections de cohérence"""
     data = [
-        ["2020",  99126, 3780, 181_371_900, np.nan, 22.15, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2021", 119731, 6711, 181_371_900, np.nan, 69.47, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2022", 146375, 5534, 181_371_900, np.nan, 28.67, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2023", 180162, 6399, 181_371_900, np.nan, 15.88, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
@@ -1057,6 +1056,20 @@ def main():
     with col_chart:
         st.subheader(f"Graphique de Prix - {frequency}")
         chart_fig = create_advanced_candlestick_chart(df_with_indicators, chart_type, params)
+        # Appliquer le thème sombre au graphique principal aussi
+        chart_fig.update_layout(
+            plot_bgcolor='#1e1e1e',
+            paper_bgcolor='#1e1e1e',
+            font_color='white'
+        )
+        chart_fig.update_xaxes(
+            showgrid=True, gridwidth=1, gridcolor='#404040',
+            title_font_color='white', tickfont_color='white'
+        )
+        chart_fig.update_yaxes(
+            showgrid=True, gridwidth=1, gridcolor='#404040',
+            title_font_color='white', tickfont_color='white'
+        )
         st.plotly_chart(chart_fig, use_container_width=True, config={"displaylogo": False})
     
     with col_fundamentals:
@@ -1185,3 +1198,5 @@ Consultez toujours les sources officielles BRVM avant toute décision financièr
 
 if __name__ == "__main__":
     main()# memoire_gueri_dashboard_interactif.py
+        ["2020",  99126, 3780, 181_371_900, np.nan, 22.15, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2021", 119731, 6711
