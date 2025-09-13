@@ -676,7 +676,7 @@ def main():
     st.title("Dashboard Marchés Boursiers - BRVM")
     with st.sidebar:
         st.header("Données prix")
-        uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
+        uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
 
         # Charger PRIX : d'abord upload, sinon fallback sur DEFAULT_PRICE_PATH
         if uploader is not None:
@@ -759,8 +759,8 @@ def main():
 
         # --------- Dividendes & Bénéfices (fichiers par défaut + upload) ---------
         st.header("Dividendes & Bénéfices (facultatif)")
-        dps_uploader = st.file_uploader("CSV Dividendes par action (DPS) par année", type=['csv'], key="dps_csv")
-        eps_uploader = st.file_uploader("CSV EPS (ou Résultat net) par année", type=['csv'], key="eps_csv")
+        dps_uploader = st.file_uploader("Dividendes par action (DPS) par année", type=['csv'], key="dps_csv")
+        eps_uploader = st.file_uploader("EPS (ou Résultat net) par année", type=['csv'], key="eps_csv")
         st.caption("Colonnes attendues : année = Annee/Année/Year/period ; valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
@@ -887,4 +887,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
