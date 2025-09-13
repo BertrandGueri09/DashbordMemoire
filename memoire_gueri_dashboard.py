@@ -1,11 +1,12 @@
-# memoire_gueri_dashboard_interactif.py
+# memoire_gueri_dashboard.py
 # -------------------------------------------------------------
 # Dashboard CFAOCI - BRVM
 # - Un SEUL CSV de prix à importer
 # - Analyse technique (fréquences dynamiques, chandelles, indicateurs)
 # - Backtests: SMA, RSI+MACD, Mixte (SMA+RSI)
 # - Fondamentaux de marché recalculés AUTOMATIQUEMENT sur la plage d'années
-#   effectivement présente dans le CSV importé (pas de bornes 2006–2025 imposées)
+#   effectivement présente dans le CSV importé (pas de bornes fixes)
+# - Accès robuste à la colonne des années (Annee/Année/Year/index)
 # -------------------------------------------------------------
 
 import streamlit as st
@@ -14,7 +15,7 @@ import numpy as np
 import io
 import re
 import warnings
-from typing import Union, Dict, Tuple, List
+from typing import Union, Dict, Tuple, List, Optional
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -30,6 +31,58 @@ st.set_page_config(
 )
 
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
+
+# --------------------------- HELPERS ROBUSTES ---------------------------
+def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
+    """
+    Détecte la colonne année dans df parmi :
+    'Annee', 'Année', 'Year', 'year' ou un index numérique.
+    Si rien trouvé, renvoie None.
+    """
+    if df is None or df.empty:
+        return None
+
+    candidates = ['Annee', 'Année', 'Year', 'year']
+    for c in candidates:
+        if c in df.columns:
+            return c
+
+    # Si aucune colonne explicite — vérifier si l'index est numérique (années)
+    if isinstance(df.index, (pd.Int64Index, pd.UInt64Index, pd.RangeIndex)):
+        # On crée une colonne 'Annee' à partir de l'index
+        df['Annee'] = df.index.astype(int)
+        return 'Annee'
+
+    # Dernier recours : si une colonne ressemble à des années (4 chiffres)
+    for c in df.columns:
+        s = df[c]
+        try:
+            vals = pd.to_numeric(s, errors='coerce')
+            if vals.notna().mean() > 0.9:
+                # majoritairement numérique ; tester si ce sont des années plausibles
+                if (vals >= 1900).mean() > 0.8 and (vals <= 2100).mean() > 0.8:
+                    df.rename(columns={c: 'Annee'}, inplace=True)
+                    return 'Annee'
+        except Exception:
+            continue
+
+    return None
+
+def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
+    """Retourne (y_min, y_max) si possible, sinon None."""
+    if df is None or df.empty:
+        return None
+    col = _detect_year_column(df)
+    if not col:
+        return None
+    try:
+        y_min = int(np.nanmin(pd.to_numeric(df[col], errors='coerce').values))
+        y_max = int(np.nanmax(pd.to_numeric(df[col], errors='coerce').values))
+        if np.isnan(y_min) or np.isnan(y_max):
+            return None
+        return (y_min, y_max)
+    except Exception:
+        return None
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -410,7 +463,7 @@ def backtest_mixed_sma_rsi(df: pd.DataFrame, sma_fast=20, sma_slow=50, rsi_windo
     trades_df = pd.DataFrame(trades, columns=['Date','Action','Prix','Quantite'])
     return data, stats, trades_df
 
-# --------------------------- FONDAMENTAUX DE MARCHÉ (AUTO, PLAGE DYNAMIQUE) ---------------------------
+# --------------------------- FONDAMENTAUX (AUTO, PLAGE DYNAMIQUE) ---------------------------
 @st.cache_data
 def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, shares_outstanding: int) -> pd.DataFrame:
     """
@@ -421,7 +474,7 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
      - volume annuel
      - max drawdown intra-année
      - capitalisation fin d'année = prix fin d'année × actions
-    La plage d'années est déduite automatiquement (min année → max année du fichier).
+    Plage d'années déduite automatiquement (min → max du fichier).
     """
     if df_original_daily.empty:
         return pd.DataFrame()
@@ -434,16 +487,17 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
         avg_price=('Close','mean'),
         vol_sum=('Volume','sum')
     )
+    # Rendement annuel
     ann['last_close_prev'] = ann['last_price'].shift(1)
     ann['annual_return_%'] = ((ann['last_price']/ann['last_close_prev']) - 1.0) * 100
 
-    # vol annualisée par année
+    # Vol annualisée par année
     def annual_vol(g):
         r = g['ret'].dropna()
         return (r.std() * np.sqrt(252) * 100) if len(r) > 1 else np.nan
     ann['vol_annual_%'] = df.groupby(pd.Grouper(freq='Y')).apply(annual_vol).values
 
-    # max DD intra-année
+    # Max drawdown intra-année
     def max_dd(g):
         c = g['Close'].dropna()
         if c.empty: return np.nan
@@ -451,11 +505,16 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
         return (c/cummax - 1.0).min() * 100
     ann['max_drawdown_intra_%'] = df.groupby(pd.Grouper(freq='Y')).apply(max_dd).values
 
-    ann['market_cap_fin_annee_FCFA'] = ann['last_price'] * shares_outstanding
+    # Capi fin d'année
+    ann['market_cap_fin_annee_FCFA'] = ann['last_price'] * float(shares_outstanding)
 
-    # Mise en forme et arrondis
-    ann.index = ann.index.year
-    ann = ann.copy()
+    # ---------- CRÉATION ROBUSTE DE LA COLONNE 'Annee' ----------
+    # Toujours fabriquer Annee à partir de l'index Datetime
+    years = ann.index.year.astype(int)
+    ann = ann.reset_index(drop=True)
+    ann.insert(0, 'Annee', years)
+
+    # Arrondis & types
     ann['last_price'] = ann['last_price'].round(2)
     ann['avg_price'] = ann['avg_price'].round(2)
     ann['vol_sum'] = ann['vol_sum'].round(0).astype('Int64')
@@ -464,18 +523,18 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
     ann['market_cap_fin_annee_FCFA'] = ann['market_cap_fin_annee_FCFA'].round(0).astype('Int64')
     ann['max_drawdown_intra_%'] = ann['max_drawdown_intra_%'].round(2)
 
-    ann = ann.reset_index().rename(columns={'index': 'Annee'}).rename(columns={'Annee':'Année'})
-    ann = ann.rename(columns={'Année':'Annee'})  # on garde "Annee" sans accent pour compatibilité CSV
     return ann
 
 def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     """4 volets : Capitalisation fin d’année, Rendement annuel, Vol annualisée, Volume annuel."""
+    year_col = _detect_year_column(ann_df) or 'Annee'
+    x = ann_df[year_col]
+
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)', 'Volatilité annualisée (%)', 'Volume annuel (titres)'],
         vertical_spacing=0.20, horizontal_spacing=0.12
     )
-    x = ann_df['Annee']
     fig.add_trace(go.Bar(x=x, y=ann_df['market_cap_fin_annee_FCFA'], name='Capi fin année'), row=1, col=1)
     fig.add_trace(go.Scatter(x=x, y=ann_df['annual_return_%'], name='Rendement annuel', mode='lines+markers'), row=1, col=2)
     fig.add_trace(go.Scatter(x=x, y=ann_df['vol_annual_%'], name='Vol annualisée', mode='lines+markers'), row=2, col=1)
@@ -491,7 +550,7 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
 # --------------------------- APP ---------------------------
 def main():
     st.title("Dashboard CFAOCI - BRVM")
-    st.caption("Un seul CSV de prix → Analyse technique & Fondamentaux de marché recalculés automatiquement sur la plage d’années du fichier")
+    st.caption("Un seul CSV de prix → Analyse technique & Fondamentaux recalculés automatiquement sur la plage d’années du fichier")
 
     with st.sidebar:
         st.header("Données")
@@ -583,12 +642,9 @@ def main():
     # b) Fondamentaux de marché sur df_original (NON FILTRÉ) — plage d'années dynamique
     ann_df = compute_market_fundamentals_from_original(df_original, shares)
 
-    # Plage dynamique pour le titre
-    if not ann_df.empty:
-        y_min, y_max = int(ann_df['Annee'].min()), int(ann_df['Annee'].max())
-        fund_title_suffix = f"({y_min}–{y_max})"
-    else:
-        fund_title_suffix = "(n/a)"
+    # Plage dynamique pour le titre (robuste)
+    span = _year_span(ann_df)
+    fund_title_suffix = f"({span[0]}–{span[1]})" if span else "(n/a)"
 
     # ====== AFFICHAGE ======
     st.subheader("Métriques principales")
@@ -610,18 +666,25 @@ def main():
 
     with right:
         st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
-        fund_fig = plot_market_fundamentals_summary(ann_df) if not ann_df.empty else go.Figure()
-        if not ann_df.empty:
+        if (ann_df is not None) and (not ann_df.empty):
+            fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
             st.dataframe(ann_df, use_container_width=True)
+
+            # nom de fichier dynamique seulement si on a la plage
+            if span:
+                fname = f"CFAOCI_fondamentaux_de_marche_{span[0]}_{span[1]}.csv"
+            else:
+                fname = "CFAOCI_fondamentaux_de_marche.csv"
+
             st.download_button(
                 f"Télécharger fondamentaux de marché {fund_title_suffix} (CSV)",
                 ann_df.to_csv(index=False).encode('utf-8'),
-                file_name=f"CFAOCI_fondamentaux_de_marche_{y_min}_{y_max}.csv",
+                file_name=fname,
                 mime="text/csv"
             )
         else:
-            st.info("Aucun fondamental de marché calculable (fichier vide).")
+            st.info("Aucun fondamental de marché calculable (fichier vide ou colonnes manquantes).")
 
     st.subheader(f"Backtesting — {strat}")
     if strat == "SMA Crossover":
@@ -663,9 +726,9 @@ def main():
 
     st.markdown("---")
     st.info(
-        "**Automatisation** : *A chaque nouveau CSV importé, les fondamentaux de marché sont recalculés* "
+        "*À chaque nouveau CSV importé, les fondamentaux de marché sont recalculés* "
         "*sur* **toutes** *les années réellement présentes dans le fichier (plage dynamique).* "
-        "*Capitalisation = prix fin d’année × actions (paramétrable). Les backtests sont indicatifs.*"
+        "**Capitalisation** = *prix fin d’année × actions (paramétrable). Les backtests sont indicatifs.*"
     )
 
 if __name__ == "__main__":
