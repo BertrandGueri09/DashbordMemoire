@@ -7,6 +7,7 @@
 # - Fondamentaux de marché recalculés AUTOMATIQUEMENT sur la plage d'années
 #   effectivement présente dans le CSV importé (pas de bornes fixes)
 # - Accès robuste à la colonne des années (Annee/Année/Year/index)
+# - Affichage SANS tableau des fondamentaux : résumé + bouton de téléchargement
 # -------------------------------------------------------------
 
 import streamlit as st
@@ -49,7 +50,6 @@ def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
 
     # Si aucune colonne explicite — vérifier si l'index est numérique (années)
     if isinstance(df.index, (pd.Int64Index, pd.UInt64Index, pd.RangeIndex)):
-        # On crée une colonne 'Annee' à partir de l'index
         df['Annee'] = df.index.astype(int)
         return 'Annee'
 
@@ -59,7 +59,6 @@ def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
         try:
             vals = pd.to_numeric(s, errors='coerce')
             if vals.notna().mean() > 0.9:
-                # majoritairement numérique ; tester si ce sont des années plausibles
                 if (vals >= 1900).mean() > 0.8 and (vals <= 2100).mean() > 0.8:
                     df.rename(columns={c: 'Annee'}, inplace=True)
                     return 'Annee'
@@ -76,10 +75,9 @@ def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
     if not col:
         return None
     try:
-        y_min = int(np.nanmin(pd.to_numeric(df[col], errors='coerce').values))
-        y_max = int(np.nanmax(pd.to_numeric(df[col], errors='coerce').values))
-        if np.isnan(y_min) or np.isnan(y_max):
-            return None
+        y_vals = pd.to_numeric(df[col], errors='coerce')
+        y_min = int(np.nanmin(y_vals.values))
+        y_max = int(np.nanmax(y_vals.values))
         return (y_min, y_max)
     except Exception:
         return None
@@ -508,8 +506,7 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
     # Capi fin d'année
     ann['market_cap_fin_annee_FCFA'] = ann['last_price'] * float(shares_outstanding)
 
-    # ---------- CRÉATION ROBUSTE DE LA COLONNE 'Annee' ----------
-    # Toujours fabriquer Annee à partir de l'index Datetime
+    # Colonne 'Annee' robuste
     years = ann.index.year.astype(int)
     ann = ann.reset_index(drop=True)
     ann.insert(0, 'Annee', years)
@@ -547,16 +544,71 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     fig.update_layout(height=520, showlegend=False, margin=dict(t=90, b=60, l=60, r=60))
     return fig
 
+def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
+    """
+    Génère un court résumé lisible à partir des fondamentaux calculés.
+    - Dernière année (prix fin d’année, capi, rendement, vol, MDD)
+    - Volumes annuels moyens
+    - CAGR long terme (première → dernière année)
+    """
+    if ann_df is None or ann_df.empty:
+        return "Aucun indicateur fondamental calculable sur la période importée."
+
+    year_col = _detect_year_column(ann_df) or 'Annee'
+    ann_df = ann_df.sort_values(year_col).reset_index(drop=True)
+
+    # Dernière année
+    last = ann_df.iloc[-1]
+    last_year = int(last[year_col])
+    last_price = float(last['last_price'])
+    last_cap = int(last['market_cap_fin_annee_FCFA']) if pd.notna(last['market_cap_fin_annee_FCFA']) else None
+    last_ret = float(last['annual_return_%']) if pd.notna(last['annual_return_%']) else None
+    last_vol = float(last['vol_annual_%']) if pd.notna(last['vol_annual_%']) else None
+    last_mdd = float(last['max_drawdown_intra_%']) if pd.notna(last['max_drawdown_intra_%']) else None
+
+    # Volume moyen (titres)
+    vol_mean = ann_df['vol_sum'].dropna()
+    vol_mean = float(vol_mean.mean()) if not vol_mean.empty else None
+
+    # CAGR long terme
+    first = ann_df.iloc[0]
+    first_year = int(first[year_col])
+    first_price = float(first['last_price'])
+    n_years = max(1, last_year - first_year)
+    cagr = None
+    if first_price > 0:
+        cagr = (last_price / first_price) ** (1 / n_years) - 1
+
+    # Construire le résumé
+    lines = []
+    lines.append(f"**Synthèse fondamentale ({first_year}–{last_year})**")
+    lines.append(f"- **Prix fin {last_year}** : {last_price:,.2f} FCFA")
+    if last_cap is not None:
+        lines.append(f"- **Capitalisation fin {last_year}** : {last_cap:,.0f} FCFA")
+    if last_ret is not None:
+        lines.append(f"- **Rendement annuel {last_year}** : {last_ret:.2f} %")
+    if last_vol is not None:
+        lines.append(f"- **Volatilité annualisée {last_year}** : {last_vol:.2f} %")
+    if last_mdd is not None:
+        lines.append(f"- **Max Drawdown intra-année {last_year}** : {last_mdd:.2f} %")
+    if vol_mean is not None:
+        lines.append(f"- **Volume annuel moyen (titres)** : {vol_mean:,.0f}")
+
+    if cagr is not None:
+        lines.append(f"- **CAGR ({first_year}→{last_year})** : {100*cagr:.2f} % / an")
+    lines.append("> Indicateurs dérivés des prix quotidiens : capitalisation = prix fin d’année × actions en circulation (paramétrable).")
+    return "\n".join(lines)
+
 # --------------------------- APP ---------------------------
 def main():
-    st.title("Dashboard CFAOCI - BRVM")
+    st.title("📈 Dashboard CFAOCI - BRVM")
     st.caption("Un seul CSV de prix → Analyse technique & Fondamentaux recalculés automatiquement sur la plage d’années du fichier")
 
     with st.sidebar:
         st.header("Données")
         uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
         if uploader is None:
-            st.info("Importez un fichier CSV pour commencer.")
+            st.info("👉 Importez un fichier CSV pour commencer.")
             st.stop()
 
         # 1) Charger les données ORIGINALES (pour fondamentaux de marché)
@@ -667,16 +719,17 @@ def main():
     with right:
         st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
         if (ann_df is not None) and (not ann_df.empty):
+            # Graphique récap fondamental
             fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
-            st.dataframe(ann_df, use_container_width=True)
 
-            # nom de fichier dynamique seulement si on a la plage
-            if span:
-                fname = f"CFAOCI_fondamentaux_de_marche_{span[0]}_{span[1]}.csv"
-            else:
-                fname = "CFAOCI_fondamentaux_de_marche.csv"
+            # >>>> NO TABLE: plus de st.dataframe ici <<<<
 
+            # Résumé court d'analyse fondamentale (exact, issu des calculs)
+            st.markdown(summarize_fundamentals(ann_df))
+
+            # Bouton de téléchargement uniquement
+            fname = f"CFAOCI_fondamentaux_de_marche_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux_de_marche.csv"
             st.download_button(
                 f"Télécharger fondamentaux de marché {fund_title_suffix} (CSV)",
                 ann_df.to_csv(index=False).encode('utf-8'),
@@ -726,9 +779,9 @@ def main():
 
     st.markdown("---")
     st.info(
-        "*À chaque nouveau CSV importé, les fondamentaux de marché sont recalculés* "
-        "*sur* **toutes** *les années réellement présentes dans le fichier (plage dynamique).* "
-        "**Capitalisation** = *prix fin d’année × actions (paramétrable). Les backtests sont indicatifs.*"
+        "⚠️ À chaque nouveau CSV importé, les fondamentaux de marché sont recalculés "
+        "sur **toutes** les années réellement présentes dans le fichier (plage dynamique). "
+        "Capitalisation = prix fin d’année × actions (paramétrable). Les backtests sont indicatifs."
     )
 
 if __name__ == "__main__":
