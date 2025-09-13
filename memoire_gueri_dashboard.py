@@ -640,7 +640,7 @@ def fundamentals_default_df() -> pd.DataFrame:
         ["2022", 146375, 5534, 181_371_900, np.nan, 28.67, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2023", 180162, 6399, 181_371_900, np.nan, 15.88, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2024", 158313, 4693, 181_371_900, np.nan,  7.04, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
-        ["2025", np.nan, np.nan, 181_371_900, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
+        ["2025",     np.nan,   np.nan, 181_371_900, np.nan,   np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
     ]
     cols = ["period","revenue","net_income","shares_outstanding","dividends_total","dividend_per_share","total_equity","total_debt","total_assets","cash_and_equivalents","capex","EPS"]
     return pd.DataFrame(data, columns=cols)
@@ -1201,4 +1201,5 @@ if __name__ == "__main__":
     main()# memoire_gueri_dashboard_interactif.py
         ["2020",  99126, 3780, 181_371_900, np.nan, 22.15, np.nan, np.nan, np.nan, np.nan, np.nan, np.nan],
         ["2021", 119731, 6711
+
 
