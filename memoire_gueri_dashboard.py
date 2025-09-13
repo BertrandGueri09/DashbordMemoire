@@ -933,12 +933,13 @@ def main():
     # NOTE DE FIABILITÉ
     st.markdown("---")
     st.info(
-        "## **Qualité des données** : vérifiez que votre CSV correspond bien aux cours officiels BRVM. "
+        "**Qualité des données** : *vérifiez que votre CSV correspond bien aux cours officiels BRVM. "
         "En cas d’écarts, rechargez un fichier à jour depuis votre source de confiance. "
         "Le PER est calculé comme Prix / EPS (EPS = Résultat net / Actions). Les valeurs aberrantes sont neutralisées. "
-        "Les backtests sont indicatifs (pas de slippage, pas de gaps hors séance)."
+        "Les backtests sont indicatifs (pas de slippage, pas de gaps hors séance)."*
     )
 
 if __name__ == "__main__":
     main()
+
 
