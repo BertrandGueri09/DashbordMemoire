@@ -75,14 +75,14 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 
 LIGHT_CSS = """
 <style>
-body, .block-container { background-color: #ffffff; color: #111; }
+body, .block-container { background-color: #77b5fe; color: #111; }
 .app-subtitle { color: #444; }
 </style>
 """
 
 DARK_CSS = """
 <style>
-body, .block-container { background-color: #77b5fe ; color: #e8e6e3; }
+body, .block-container { background-color: #0e1117 ; color: #e8e6e3; }
 .small-note { color: #c9c7c4; }
 .app-subtitle { color: #c9c7c4; }
 </style>
