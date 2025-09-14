@@ -81,7 +81,7 @@ def set_fig_template(fig: go.Figure, light_theme: bool):
     # Gère aussi les couleurs de fond pour une meilleure intégration
     if light_theme:
         fig.update_layout(template="plotly",
-                          paper_bgcolor="white", plot_bgcolor="white",
+                          paper_bgcolor="white", plot_bgcolor="#f4f4f4",
                           font=dict(color="#222"))
     else:
         fig.update_layout(template="plotly_dark",
@@ -924,6 +924,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
