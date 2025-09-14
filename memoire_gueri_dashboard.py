@@ -641,13 +641,13 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
     has_per   = 'PER' in ann_df.columns and ann_df['PER'].notna().any()
     if not has_yield and not has_per:
         return None
-    fig = make_subplots(rows=1, cols=2, subplot_titles=['Dividend Yield (%)', 'PER (x)'],
+    fig = make_subplots(rows=1, cols=1, subplot_titles=['Dividend Yield (%)', 'PER (x)'],
                         shared_xaxes=False, vertical_spacing=0.05, horizontal_spacing=0.08)
     if has_yield:
         fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)'), row=1, col=1)
         fig.update_yaxes(title_text="%", row=1, col=1)
     if has_per:
-        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)'), row=1, col=2)
         fig.update_yaxes(title_text="x", row=1, col=2)
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
@@ -913,6 +913,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
