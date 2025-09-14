@@ -1,11 +1,14 @@
-# memoire_gueri_dashboard.py — Version 1 colonne automatique
-# -----------------------------------------------------------
-# - Affichage uniquement en UNE colonne (stack vertical)
-# - Dividend Yield & PER sous le graphique technique (affichage auto si DPS/EPS dispos)
-# - Fondamentaux (graphiques) + synthèse + téléchargement
+# memoire_gueri_dashboard.py — 1 colonne + Thème clair/sombre + Exports PNG + Régimes de marché
+# ------------------------------------------------------------------------------------------------
+# - Affichage en une seule colonne (stack vertical)
+# - Thème clair/sombre (toggle sidebar) + CSS lisible (polices compactes)
+# - Exports PNG pour les graphiques Plotly (avec kaleido si dispo)
+# - Dividend Yield & PER affichés automatiquement si DPS/EPS fournis
+# - Fondamentaux calculés à partir des PRIX (capi, rendements, vol, volume, drawdown)
+# - Résumé des régimes de marché par périodes (2006–2010, 2011–2015, 2016–2020, 2021–2025)
 # - Backtests : SMA, RSI+MACD, Mixte
 # - Fichiers par défaut auto-chargés si pas d’upload
-# -----------------------------------------------------------
+# ------------------------------------------------------------------------------------------------
 
 import streamlit as st
 import pandas as pd
@@ -23,27 +26,11 @@ warnings.filterwarnings('ignore')
 
 # --------------------------- CONFIG ---------------------------
 st.set_page_config(
-    page_title="      Dashboard Marchés Boursiers-BRVM      ",
+    page_title="Dashboard CFAOCI - BRVM",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# ===== CSS : tailles réduites + espacement pour lisibilité =====
-st.markdown("""
-<style>
-.block-container {padding-top: 0.7rem; padding-bottom: 0.7rem;}
-section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem;}
-div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
-.element-container:has(.stPlotlyChart) {margin-bottom: 0.4rem;}
-/* Métriques compactes */
-[data-testid="stMetric"] div {font-size: 0.9rem;}
-[data-testid="stMetricValue"] {font-size: 1.2rem !important;}
-[data-testid="stMetricDelta"] {font-size: 0.8rem !important;}
-/* Paragraphes / listes lisibles même avec la sidebar ouverte */
-p, li { line-height: 1.35; font-size: 0.95rem; }
-h2, h3, h4 { margin-bottom: 0.2rem; }
-</style>
-""", unsafe_allow_html=True)
 
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
@@ -53,38 +40,83 @@ DEFAULT_DPS_PATH   = "dps_exemple.csv"
 DEFAULT_EPS_PATH   = "eps_exemple.csv"
 DEFAULT_NET_PATH   = "net_income_exemple.csv"
 
-# --------------------------- HELPERS ---------------------------
-def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
-    if df is None or df.empty:
-        return None
-    for c in ['Annee', 'Année', 'Year', 'year', 'period']:
-        if c in df.columns:
-            return c
-    if isinstance(df.index, (pd.Int64Index, pd.UInt64Index, pd.RangeIndex)):
-        df['Annee'] = df.index.astype(int)
-        return 'Annee'
-    for c in df.columns:
-        s = df[c]
-        try:
-            vals = pd.to_numeric(s, errors='coerce')
-            if vals.notna().mean() > 0.9 and (vals.between(1900, 2100)).mean() > 0.8:
-                df.rename(columns={c: 'Annee'}, inplace=True)
-                return 'Annee'
-        except Exception:
-            continue
-    return None
+# ===== CSS de base (compact) =====
+BASE_CSS = """
+<style>
+.block-container {padding-top: 0.7rem; padding-bottom: 0.7rem; max-width: 1600px;}
+section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem;}
+div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
+.element-container:has(.stPlotlyChart) {margin-bottom: 0.4rem;}
+/* Métriques compactes */
+[data-testid="stMetric"] div {font-size: 0.9rem;}
+[data-testid="stMetricValue"] {font-size: 1.2rem !important;}
+[data-testid="stMetricDelta"] {font-size: 0.8rem !important;}
+/* Paragraphes / listes lisibles même avec la sidebar ouverte */
+p, li { line-height: 1.35; font-size: 0.95rem; }
+h2, h3, h4 { margin-bottom: 0.25rem; }
+hr { margin: 0.5rem 0 0.6rem 0; }
+.small-note { font-size: 0.9rem; color: #666; }
+</style>
+"""
 
-def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
-    if df is None or df.empty:
-        return None
-    col = _detect_year_column(df)
-    if not col:
-        return None
+LIGHT_CSS = """
+<style>
+body, .block-container { background-color: #ffffff; color: #111; }
+</style>
+"""
+
+DARK_CSS = """
+<style>
+body, .block-container { background-color: #0e1117; color: #e8e6e3; }
+.small-note { color: #c9c7c4; }
+</style>
+"""
+
+# --------------------------- HELPERS THEME & EXPORT ---------------------------
+def apply_theme_css(light_theme: bool):
+    st.markdown(BASE_CSS, unsafe_allow_html=True)
+    st.markdown(LIGHT_CSS if light_theme else DARK_CSS, unsafe_allow_html=True)
+
+def set_fig_template(fig: go.Figure, light_theme: bool):
+    # Gère aussi les couleurs de fond pour une meilleure intégration
+    if light_theme:
+        fig.update_layout(template="plotly",
+                          paper_bgcolor="white", plot_bgcolor="white",
+                          font=dict(color="#222"))
+    else:
+        fig.update_layout(template="plotly_dark",
+                          paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                          font=dict(color="#e8e6e3"))
+
+def fig_to_png_bytes(fig: go.Figure, scale: float = 2.0) -> Optional[bytes]:
+    """Retourne des bytes PNG si kaleido est disponible, sinon None."""
     try:
-        y = pd.to_numeric(df[col], errors='coerce')
-        return int(np.nanmin(y.values)), int(np.nanmax(y.values))
+        return fig.to_image(format="png", scale=scale)
     except Exception:
         return None
+
+def download_png_buttons(figures: List[Tuple[str, go.Figure]], light_theme: bool, col_count: int = 3):
+    """Affiche des boutons de téléchargement PNG pour une liste (label, figure)."""
+    rows = (len(figures) + col_count - 1) // col_count
+    idx = 0
+    for _ in range(rows):
+        cols = st.columns(col_count)
+        for c in cols:
+            if idx >= len(figures): break
+            label, f = figures[idx]
+            set_fig_template(f, light_theme)
+            png_bytes = fig_to_png_bytes(f, scale=2.0)
+            if png_bytes is not None:
+                c.download_button(
+                    f"⬇️ PNG – {label}",
+                    data=png_bytes,
+                    file_name=f"{label.replace(' ', '_').lower()}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+            else:
+                c.caption(f"⚠️ Export PNG indisponible (kaleido non installé) – utilisez l’icône caméra du menu Plotly.")
+            idx += 1
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -222,7 +254,7 @@ def add_indicators(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
         df['MACD_L'], df['MACD_S'], df['MACD_H'] = macd_l, macd_s, macd_h
     return df
 
-def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go.Figure:
+def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict, light_theme: bool) -> go.Figure:
     rows = 1 + int(params.get('show_rsi')) + int(params.get('show_macd'))
     row_heights = [1.0] if rows==1 else ([0.68, 0.32] if rows==2 else [0.6, 0.22, 0.18])
     titles = ['Prix & Volume'] + (['RSI'] if params.get('show_rsi') else []) + (['MACD'] if params.get('show_macd') else [])
@@ -260,6 +292,7 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
     fig.update_layout(height=620, hovermode='x unified', showlegend=True,
                       legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
                       margin=dict(t=30, b=30, l=30, r=20))
+    set_fig_template(fig, light_theme)
     return fig
 
 # --------------------------- BACKTESTS ---------------------------
@@ -395,6 +428,38 @@ def backtest_mixed_sma_rsi(df, sma_fast=20, sma_slow=50, rsi_window=14, rsi_ente
     return data, stats, trades_df
 
 # --------------------------- FONDAMENTAUX AUTO ---------------------------
+def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
+    if df is None or df.empty:
+        return None
+    for c in ['Annee', 'Année', 'Year', 'year', 'period']:
+        if c in df.columns:
+            return c
+    if isinstance(df.index, (pd.Int64Index, pd.UInt64Index, pd.RangeIndex)):
+        df['Annee'] = df.index.astype(int)
+        return 'Annee'
+    for c in df.columns:
+        s = df[c]
+        try:
+            vals = pd.to_numeric(s, errors='coerce')
+            if vals.notna().mean() > 0.9 and (vals.between(1900, 2100)).mean() > 0.8:
+                df.rename(columns={c: 'Annee'}, inplace=True)
+                return 'Annee'
+        except Exception:
+            continue
+    return None
+
+def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
+    if df is None or df.empty:
+        return None
+    col = _detect_year_column(df)
+    if not col:
+        return None
+    try:
+        y = pd.to_numeric(df[col], errors='coerce')
+        return int(np.nanmin(y.values)), int(np.nanmax(y.values))
+    except Exception:
+        return None
+
 @st.cache_data
 def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, shares_outstanding: int) -> pd.DataFrame:
     if df_original_daily.empty:
@@ -519,7 +584,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
         out['PER'] = (out['last_price'] / out['EPS'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).round(2)
     return out
 
-def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
+def plot_market_fundamentals_summary(ann_df: pd.DataFrame, light_theme: bool) -> go.Figure:
     year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
     fig = make_subplots(
@@ -537,9 +602,10 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(title_text="%",    row=2, col=1)
     fig.update_yaxes(title_text="Titres", row=2, col=2)
     fig.update_layout(height=480, showlegend=False, margin=dict(t=28, b=22, l=24, r=10))
+    set_fig_template(fig, light_theme)
     return fig
 
-def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
+def plot_dividend_and_pe(ann_df: pd.DataFrame, light_theme: bool) -> Optional[go.Figure]:
     if ann_df is None or ann_df.empty:
         return None
     year_col = _detect_year_column(ann_df) or 'Annee'
@@ -560,6 +626,7 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
     fig.update_layout(height=380, showlegend=False, margin=dict(t=26, b=18, l=24, r=10))
+    set_fig_template(fig, light_theme)
     return fig
 
 def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
@@ -592,20 +659,67 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
     if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield):.2f} %")
     if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {float(div_total):,.0f} FCFA")
     if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
-    lines.append("> Capi = prix fin d’année × actions. EPS : fourni/calculé, ou estimé via DPS & payout ratio.")
+    lines.append("> Capi = prix fin d’année × actions. EPS fourni/calculé ou estimé via DPS & payout ratio.")
     return "\n".join(lines)
+
+# --------------------------- RÉGIMES DE MARCHÉ (phrases courtes) ---------------------------
+def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
+    """
+    Génère des phrases par blocs (2006–2010, 2011–2015, 2016–2020, 2021–2025) si couverts par les données.
+    Règles simples:
+      - haussier si rendement moyen > +8%
+      - baissier si rendement moyen < -5%
+      - sinon neutre/consolidation
+      Ajoute le meilleur et pire millésime du bloc.
+    """
+    if ann_df is None or ann_df.empty: return ["Aucune donnée annuelle disponible pour décrire les régimes de marché."]
+    yc = _detect_year_column(ann_df) or 'Annee'
+    df = ann_df[[yc, 'annual_return_%']].dropna().copy()
+    if df.empty: return ["Rendements annuels indisponibles."]
+    start, end = int(df[yc].min()), int(df[yc].max())
+
+    # Définition des fenêtres standard ; on ne garde que celles qui croisent la période réelle
+    windows = [(2006, 2010), (2011, 2015), (2016, 2020), (2021, 2025)]
+    out = []
+    for a, b in windows:
+        s, e = max(start, a), min(end, b)
+        if s > e:  # pas de recouvrement
+            continue
+        block = df[(df[yc] >= s) & (df[yc] <= e)]
+        if block.empty:
+            continue
+        mean_ret = block['annual_return_%'].mean()
+        best_row = block.loc[block['annual_return_%'].idxmax()]
+        worst_row = block.loc[block['annual_return_%'].idxmin()]
+        if mean_ret > 8:
+            label = "marché haussier"
+        elif mean_ret < -5:
+            label = "marché baissier"
+        else:
+            label = "phase de consolidation"
+        out.append(
+            f"**{s}–{e}** : {label} (rendement moyen ≈ {mean_ret:.1f}%). "
+            f"Meilleure année : {int(best_row[yc])} ({best_row['annual_return_%']:.1f}%). "
+            f"Pire année : {int(worst_row[yc])} ({worst_row['annual_return_%']:.1f}%)."
+        )
+    if not out:
+        out = [f"Période couverte {start}–{end} sans bloc standard complet ; tendance moyenne ≈ {df['annual_return_%'].mean():.1f}%."]
+    return out
 
 # --------------------------- APP ---------------------------
 def main():
-    st.title("Dashboard Marchés Boursiers-BRVM")
-
+    st.title("Dashboard Mqrchés Boursiers-BRVM")
     # ===== SIDEBAR =====
     with st.sidebar:
+        # Thème
+        light_theme = st.toggle("Thème clair", value=True)
+        apply_theme_css(light_theme)
+
         st.header("Données prix")
-        uploader = st.file_uploader("Importer le CSV ", type=['csv'], key="price_csv")
+        uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
         if uploader is not None:
             df_original = load_data(uploader)
-            st.success("Données de prix chargées depuis l’upload.")
+            st.success("Données de prix chargées")
         else:
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
@@ -680,13 +794,16 @@ def main():
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("CSV DPS par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("CSV EPS (ou Résultat net)", type=['csv'], key="eps_csv")
-        st.caption("Année = Année ; Valeur = DPS | EPS | net_income (FCFA).")
+        st.caption("Année = Année; Valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
         manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
     # ===== TRAITEMENTS =====
+    # Thème pour figures
+    apply_theme_css(light_theme)
+
     df_view = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
     df = add_indicators(resample_ohlcv(df_view, freq_code=freq_code), params)
     metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
@@ -732,11 +849,11 @@ def main():
 
     # ===== 1) GRAPHIQUE TECHNIQUE =====
     st.subheader("Graphique technique")
-    fig = plotly_combined_chart(df, chart_type, params)
-    st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+    tech_fig = plotly_combined_chart(df, chart_type, params, light_theme)
+    st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
     # ===== 2) Dividend Yield & PER (AUTO si données) =====
-    extra_fig = plot_dividend_and_pe(ann_df)
+    extra_fig = plot_dividend_and_pe(ann_df, light_theme)
     if extra_fig is not None:
         st.subheader("Dividend Yield & PER")
         st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
@@ -744,13 +861,18 @@ def main():
     # ===== 3) Graphiques fondamentaux (marché) =====
     st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
     if (ann_df is not None) and (not ann_df.empty):
-        fund_fig = plot_market_fundamentals_summary(ann_df)
+        fund_fig = plot_market_fundamentals_summary(ann_df, light_theme)
         st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
 
-        # ===== 4) Synthèse fondamentale courte & lisible =====
+        # ===== 4) Synthèse fondamentale =====
         st.markdown(summarize_fundamentals(ann_df))
 
-        # ===== 5) Téléchargement =====
+        # ===== 5) Régimes de marché (phrases courtes) =====
+        st.markdown("**Régimes de marché (par périodes standards)**")
+        for line in describe_market_regimes(ann_df):
+            st.write(f"- {line}")
+
+        # ===== 6) Téléchargement fondamentaux =====
         fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
         st.download_button(
             f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
@@ -760,7 +882,7 @@ def main():
     else:
         st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
 
-    # ===== 6) BACKTEST =====
+    # ===== 7) BACKTEST =====
     st.subheader(f"Backtesting — {strat}")
     if strat == "SMA Crossover":
         bt_df, bt_stats, bt_trades = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
@@ -789,6 +911,7 @@ def main():
     eq_fig = go.Figure()
     eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
     eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
+    set_fig_template(eq_fig, light_theme)
     st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
 
     cdl1, cdl2 = st.columns(2)
@@ -798,6 +921,15 @@ def main():
     with cdl2:
         st.download_button("Équity (CSV)", bt_df[['Date','equity']].to_csv(index=False).encode('utf-8'),
                            "CFAOCI_backtest_equity.csv", "text/csv")
+
+    # ===== 8) EXPORTS PNG regroupés =====
+    st.subheader("Exports PNG")
+    figs_to_export = [("graphique_technique", tech_fig)]
+    if extra_fig is not None:
+        figs_to_export.append(("dividend_yield_pe", extra_fig))
+    if (ann_df is not None) and (not ann_df.empty):
+        figs_to_export.append(("fondamentaux_marche", fund_fig))
+    figs_to_export.append(("backtest_equity", eq_fig))
+    download_png_buttons(figs_to_export, light_theme, col_count=3)
 if __name__ == "__main__":
     main()
-
