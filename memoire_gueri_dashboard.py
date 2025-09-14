@@ -75,7 +75,7 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 
 LIGHT_CSS = """
 <style>
-body, .block-container { background-color: #77b5fe; color: #111; }
+body, .block-container { background-color: #00FFFF; color: #111; }
 .app-subtitle { color: #444; }
 </style>
 """
@@ -899,6 +899,7 @@ def main():
     
 if __name__ == "__main__":
     main()
+
 
 
 
