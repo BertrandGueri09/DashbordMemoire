@@ -75,7 +75,7 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 
 LIGHT_CSS = """
 <style>
-body, .block-container { background-color: #00FFFF; color: #111; }
+body, .block-container { background-color: #008080; color: #111; }
 .app-subtitle { color: #444; }
 </style>
 """
@@ -692,7 +692,7 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 def main():
     # ======= Thème depuis la sidebar (appliqué avant tout rendu) =======
     with st.sidebar:
-        light_theme = st.toggle("🎨 Thème clair", value=True)
+        light_theme = st.toggle("Thème", value=True)
     apply_theme_css(light_theme)
 
     # ======= Titre centré (corrigé) =======
@@ -798,7 +798,6 @@ def main():
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
-        st.info(f"ℹ️ DPS par défaut : {DEFAULT_DPS_PATH}")
     else:
         dps_df = None
 
@@ -899,6 +898,7 @@ def main():
     
 if __name__ == "__main__":
     main()
+
 
 
 
