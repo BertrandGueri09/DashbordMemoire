@@ -682,7 +682,6 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 
 # --------------------------- APP ---------------------------
 def main():
-
     # ======= Titre centré (corrigé) =======
     centered_title("Dashboard Marchés Boursiers – BRVM",
                    "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests")
@@ -881,11 +880,10 @@ def main():
     eq_fig = go.Figure()
     eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
     eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
-    set_fig_template(eq_fig, light_theme)
-    st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
     
 if __name__ == "__main__":
     main()
+
 
 
 
