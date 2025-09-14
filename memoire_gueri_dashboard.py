@@ -1,14 +1,5 @@
-# memoire_gueri_dashboard.py — 1 colonne + Thème clair/sombre + Exports PNG + Régimes de marché
-# ------------------------------------------------------------------------------------------------
-# - Affichage en une seule colonne (stack vertical)
-# - Thème clair/sombre (toggle sidebar) + CSS lisible (polices compactes)
-# - Exports PNG pour les graphiques Plotly (avec kaleido si dispo)
-# - Dividend Yield & PER affichés automatiquement si DPS/EPS fournis
-# - Fondamentaux calculés à partir des PRIX (capi, rendements, vol, volume, drawdown)
-# - Résumé des régimes de marché par périodes (2006–2010, 2011–2015, 2016–2020, 2021–2025)
-# - Backtests : SMA, RSI+MACD, Mixte
-# - Fichiers par défaut auto-chargés si pas d’upload
-# ------------------------------------------------------------------------------------------------
+# memoire_gueri_dashboard.py — 1 colonne + Thème clair/sombre + Exports PNG + Régimes + Titre centré corrigé
+# ------------------------------------------------------------------------------------------------------------
 
 import streamlit as st
 import pandas as pd
@@ -26,7 +17,7 @@ warnings.filterwarnings('ignore')
 
 # --------------------------- CONFIG ---------------------------
 st.set_page_config(
-    page_title="Dashboard CFAOCI - BRVM",
+    page_title="Dashboard Marchés Boursiers - BRVM",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -35,14 +26,15 @@ st.set_page_config(
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
 # Fichiers par défaut
-DEFAULT_PRICE_PATH = "CFAOCI_filtre.csv"
-DEFAULT_DPS_PATH   = "dps_exemple.csv"
-DEFAULT_EPS_PATH   = "eps_exemple.csv"
-DEFAULT_NET_PATH   = "net_income_exemple.csv"
+DEFAULT_PRICE_PATH = "/mnt/data/CFAOCI_filtre.csv"
+DEFAULT_DPS_PATH   = "/mnt/data/dps_exemple.csv"
+DEFAULT_EPS_PATH   = "/mnt/data/eps_exemple.csv"
+DEFAULT_NET_PATH   = "/mnt/data/net_income_exemple.csv"
 
 # ===== CSS de base (compact) =====
 BASE_CSS = """
 <style>
+/* Conteneur global plus large + espacements compacts */
 .block-container {padding-top: 0.7rem; padding-bottom: 0.7rem; max-width: 1600px;}
 section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem;}
 div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
@@ -51,24 +43,48 @@ div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
 [data-testid="stMetric"] div {font-size: 0.9rem;}
 [data-testid="stMetricValue"] {font-size: 1.2rem !important;}
 [data-testid="stMetricDelta"] {font-size: 0.8rem !important;}
-/* Paragraphes / listes lisibles même avec la sidebar ouverte */
+/* Textes lisibles */
 p, li { line-height: 1.35; font-size: 0.95rem; }
 h2, h3, h4 { margin-bottom: 0.25rem; }
 hr { margin: 0.5rem 0 0.6rem 0; }
 .small-note { font-size: 0.9rem; color: #666; }
+
+/* ======= Titre centré et corrigé (anti-ligatures) ======= */
+.app-title {
+  text-align: center;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  font-weight: 800;
+  font-size: clamp(26px, 3.2vw, 36px);
+  line-height: 1.15;
+  letter-spacing: 0.2px;
+  margin: 0.2rem 0 0.4rem 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "kern" 1;
+}
+.app-subtitle {
+  text-align: center;
+  margin-top: -0.2rem;
+  margin-bottom: 0.6rem;
+  opacity: 0.85;
+  font-size: 0.95rem;
+}
 </style>
 """
 
 LIGHT_CSS = """
 <style>
-body, .block-container { background-color: #77b5fe; color: #000000; }
+body, .block-container { background-color: #ffffff; color: #111; }
+.app-subtitle { color: #444; }
 </style>
 """
 
 DARK_CSS = """
 <style>
-body, .block-container { background-color: #0e1117; color: #e8e6e3; }
+body, .block-container { background-color: #77b5fe ; color: #e8e6e3; }
 .small-note { color: #c9c7c4; }
+.app-subtitle { color: #c9c7c4; }
 </style>
 """
 
@@ -77,17 +93,21 @@ def apply_theme_css(light_theme: bool):
     st.markdown(BASE_CSS, unsafe_allow_html=True)
     st.markdown(LIGHT_CSS if light_theme else DARK_CSS, unsafe_allow_html=True)
 
+def centered_title(main: str, sub: str = ""):
+    html = f'<h1 class="app-title">{main}</h1>'
+    if sub:
+        html += f'<div class="app-subtitle">{sub}</div>'
+    st.markdown(html, unsafe_allow_html=True)
+
 def set_fig_template(fig: go.Figure, light_theme: bool):
-    # Gère aussi les couleurs de fond pour une meilleure intégration
     if light_theme:
         fig.update_layout(template="plotly",
-                          paper_bgcolor="#77b5fe", plot_bgcolor="#f4f4f4",
+                          paper_bgcolor="white", plot_bgcolor="#f4f4f4",
                           font=dict(color="#000000"))
     else:
         fig.update_layout(template="plotly_dark",
                           paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                           font=dict(color="#e8e6e3"))
-
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -627,7 +647,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
     if last_mdd is not None: lines.append(f"- **Max Drawdown intra-année {last_year}** : {last_mdd:.2f} %")
     if vol_mean is not None: lines.append(f"- **Volume annuel moyen (titres)** : {vol_mean:,.0f}")
     if cagr is not None: lines.append(f"- **CAGR ({first_year}→{last_year})** : {100*cagr:.2f} % / an")
-    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield):.2f} %")
+    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield)::.2f} %")
     if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {float(div_total):,.0f} FCFA")
     if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
     lines.append("> Capi = prix fin d’année × actions. EPS fourni/calculé ou estimé via DPS & payout ratio.")
@@ -635,26 +655,16 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 
 # --------------------------- RÉGIMES DE MARCHÉ (phrases courtes) ---------------------------
 def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
-    """
-    Génère des phrases par blocs (2006–2010, 2011–2015, 2016–2020, 2021–2025) si couverts par les données.
-    Règles simples:
-      - haussier si rendement moyen > +8%
-      - baissier si rendement moyen < -5%
-      - sinon neutre/consolidation
-      Ajoute le meilleur et pire millésime du bloc.
-    """
     if ann_df is None or ann_df.empty: return ["Aucune donnée annuelle disponible pour décrire les régimes de marché."]
     yc = _detect_year_column(ann_df) or 'Annee'
     df = ann_df[[yc, 'annual_return_%']].dropna().copy()
     if df.empty: return ["Rendements annuels indisponibles."]
     start, end = int(df[yc].min()), int(df[yc].max())
-
-    # Définition des fenêtres standard ; on ne garde que celles qui croisent la période réelle
     windows = [(2006, 2010), (2011, 2015), (2016, 2020), (2021, 2025)]
     out = []
     for a, b in windows:
         s, e = max(start, a), min(end, b)
-        if s > e:  # pas de recouvrement
+        if s > e: 
             continue
         block = df[(df[yc] >= s) & (df[yc] <= e)]
         if block.empty:
@@ -679,13 +689,17 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 
 # --------------------------- APP ---------------------------
 def main():
-    st.title("Dashboard Mqrchés Boursiers-BRVM")
-    # ===== SIDEBAR =====
+    # ======= Thème depuis la sidebar (appliqué avant tout rendu) =======
     with st.sidebar:
-        # Thème
-        light_theme = st.toggle("Thème clair", value=True)
-        apply_theme_css(light_theme)
+        light_theme = st.toggle("Thème", value=True)
+    apply_theme_css(light_theme)
 
+    # ======= Titre centré (corrigé) =======
+    centered_title("Dashboard Marchés Boursiers – BRVM",
+                   "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests")
+
+    # ===== SIDEBAR (suite) =====
+    with st.sidebar:
         st.header("Données prix")
         uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
         if uploader is not None:
@@ -765,21 +779,17 @@ def main():
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("CSV DPS par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("CSV EPS (ou Résultat net)", type=['csv'], key="eps_csv")
-        st.caption("Année = Année; Valeur = DPS | EPS | net_income (FCFA).")
+        st.caption("Année = Annee/Année/Year/period ; Valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
         manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
     # ===== TRAITEMENTS =====
-    # Thème pour figures
-    apply_theme_css(light_theme)
-
     df_view = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
     df = add_indicators(resample_ohlcv(df_view, freq_code=freq_code), params)
     metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
 
-    # Fondamentaux de marché depuis prix originaux
     ann_df = compute_market_fundamentals_from_original(df_original, shares)
 
     # DPS / EPS (upload > défauts)
@@ -823,13 +833,13 @@ def main():
     tech_fig = plotly_combined_chart(df, chart_type, params, light_theme)
     st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===== 2) Dividend Yield & PER (AUTO si données) =====
+    # ===== 2) Dividend Yield & PER (AUTO) =====
     extra_fig = plot_dividend_and_pe(ann_df, light_theme)
     if extra_fig is not None:
         st.subheader("Dividend Yield & PER")
         st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===== 3) Graphiques fondamentaux (marché) =====
+    # ===== 3) Graphiques fondamentaux =====
     st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
     if (ann_df is not None) and (not ann_df.empty):
         fund_fig = plot_market_fundamentals_summary(ann_df, light_theme)
@@ -838,7 +848,7 @@ def main():
         # ===== 4) Synthèse fondamentale =====
         st.markdown(summarize_fundamentals(ann_df))
 
-        # ===== 5) Régimes de marché (phrases courtes) =====
+        # ===== 5) Régimes de marché =====
         st.markdown("**Régimes de marché (par périodes standards)**")
         for line in describe_market_regimes(ann_df):
             st.write(f"- {line}")
@@ -884,21 +894,5 @@ def main():
     eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
     set_fig_template(eq_fig, light_theme)
     st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
-
-    cdl1, cdl2 = st.columns(2)
-    with cdl1:
-        st.download_button("Transactions (CSV)", bt_trades.to_csv(index=False).encode('utf-8'),
-                           "CFAOCI_backtest_trades.csv", "text/csv")
-    with cdl2:
-        st.download_button("Équity (CSV)", bt_df[['Date','equity']].to_csv(index=False).encode('utf-8'),
-                           "CFAOCI_backtest_equity.csv", "text/csv")
-
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
