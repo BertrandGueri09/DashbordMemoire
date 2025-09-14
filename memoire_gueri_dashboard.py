@@ -1,4 +1,4 @@
-# memoire_gueri_dashboard.py — 1 colonne + Thème clair/sombre + Exports PNG + Régimes + Titre centré corrigé
+# memoire_gueri_dashboard.py — Thème sombre uniquement + Exports PNG + Régimes + Titre centré
 # ------------------------------------------------------------------------------------------------------------
 
 import streamlit as st
@@ -72,6 +72,7 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 }
 </style>
 """
+
 DARK_CSS = """
 <style>
 body, .block-container { background-color: #0e1117; color: #e8e6e3; }
@@ -81,9 +82,9 @@ body, .block-container { background-color: #0e1117; color: #e8e6e3; }
 """
 
 # --------------------------- HELPERS THEME & EXPORT ---------------------------
-def apply_theme_css(light_theme: bool):
+def apply_dark_theme():
     st.markdown(BASE_CSS, unsafe_allow_html=True)
-    st.markdown(LIGHT_CSS if light_theme else DARK_CSS, unsafe_allow_html=True)
+    st.markdown(DARK_CSS, unsafe_allow_html=True)
 
 def centered_title(main: str, sub: str = ""):
     html = f'<h1 class="app-title">{main}</h1>'
@@ -91,16 +92,10 @@ def centered_title(main: str, sub: str = ""):
         html += f'<div class="app-subtitle">{sub}</div>'
     st.markdown(html, unsafe_allow_html=True)
 
-def set_fig_template(fig: go.Figure, light_theme: bool):
-    if light_theme:
-        fig.update_layout(template="plotly",
-                          paper_bgcolor="white", plot_bgcolor="white",
-                          font=dict(color="#000000"))
-    else:
-        fig.update_layout(template="plotly_dark",
-                          paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-                          font=dict(color="#e8e6e3"))
-
+def set_fig_template(fig: go.Figure):
+    fig.update_layout(template="plotly_dark",
+                      paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                      font=dict(color="#e8e6e3"))
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -238,7 +233,7 @@ def add_indicators(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
         df['MACD_L'], df['MACD_S'], df['MACD_H'] = macd_l, macd_s, macd_h
     return df
 
-def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict, light_theme: bool) -> go.Figure:
+def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go.Figure:
     rows = 1 + int(params.get('show_rsi')) + int(params.get('show_macd'))
     row_heights = [1.0] if rows==1 else ([0.68, 0.32] if rows==2 else [0.6, 0.22, 0.18])
     titles = ['Prix & Volume'] + (['RSI'] if params.get('show_rsi') else []) + (['MACD'] if params.get('show_macd') else [])
@@ -276,7 +271,7 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict, light
     fig.update_layout(height=620, hovermode='x unified', showlegend=True,
                       legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
                       margin=dict(t=30, b=30, l=30, r=20))
-    set_fig_template(fig, light_theme)
+    set_fig_template(fig)
     return fig
 
 # --------------------------- BACKTESTS ---------------------------
@@ -568,7 +563,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
         out['PER'] = (out['last_price'] / out['EPS'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).round(2)
     return out
 
-def plot_market_fundamentals_summary(ann_df: pd.DataFrame, light_theme: bool) -> go.Figure:
+def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
     fig = make_subplots(
@@ -586,10 +581,10 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame, light_theme: bool) ->
     fig.update_yaxes(title_text="%",    row=2, col=1)
     fig.update_yaxes(title_text="Titres", row=2, col=2)
     fig.update_layout(height=480, showlegend=False, margin=dict(t=28, b=22, l=24, r=10))
-    set_fig_template(fig, light_theme)
+    set_fig_template(fig)
     return fig
 
-def plot_dividend_and_pe(ann_df: pd.DataFrame, light_theme: bool) -> Optional[go.Figure]:
+def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
     if ann_df is None or ann_df.empty:
         return None
     year_col = _detect_year_column(ann_df) or 'Annee'
@@ -610,7 +605,7 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame, light_theme: bool) -> Optional[go
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
     fig.update_layout(height=380, showlegend=False, margin=dict(t=26, b=18, l=24, r=10))
-    set_fig_template(fig, light_theme)
+    set_fig_template(fig)
     return fig
 
 def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
@@ -682,11 +677,14 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 
 # --------------------------- APP ---------------------------
 def main():
-    # ======= Titre centré (corrigé) =======
+    # ======= Appliquer thème sombre =======
+    apply_dark_theme()
+
+    # ======= Titre centré =======
     centered_title("Dashboard Marchés Boursiers – BRVM",
                    "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests")
 
-    # ===== SIDEBAR (suite) =====
+    # ===== SIDEBAR =====
     with st.sidebar:
         st.header("Données prix")
         uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
@@ -767,7 +765,6 @@ def main():
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("CSV DPS par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("CSV EPS (ou Résultat net)", type=['csv'], key="eps_csv")
-        st.caption("Année = Année ; Valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
@@ -818,11 +815,11 @@ def main():
 
     # ===== 1) GRAPHIQUE TECHNIQUE =====
     st.subheader("Graphique technique")
-    tech_fig = plotly_combined_chart(df, chart_type, params, light_theme)
+    tech_fig = plotly_combined_chart(df, chart_type, params)
     st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
     # ===== 2) Dividend Yield & PER (AUTO) =====
-    extra_fig = plot_dividend_and_pe(ann_df, light_theme)
+    extra_fig = plot_dividend_and_pe(ann_df)
     if extra_fig is not None:
         st.subheader("Dividend Yield & PER")
         st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
@@ -830,7 +827,7 @@ def main():
     # ===== 3) Graphiques fondamentaux =====
     st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
     if (ann_df is not None) and (not ann_df.empty):
-        fund_fig = plot_market_fundamentals_summary(ann_df, light_theme)
+        fund_fig = plot_market_fundamentals_summary(ann_df)
         st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
 
         # ===== 4) Synthèse fondamentale =====
@@ -882,19 +879,6 @@ def main():
     eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
     set_fig_template(eq_fig)
     st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
-    
+
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
