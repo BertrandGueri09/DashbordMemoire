@@ -597,8 +597,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 
 # --------------------------- APP ---------------------------
 def main():
- st.markdown("---")
-    st.title("                    Dashboard CFAOCI - BRVM         ")
+    st.title("           Dashboard CFAOCI - BRVM         ")
 
     # ===== SIDEBAR =====
     with st.sidebar:
@@ -828,6 +827,7 @@ def main():
                            "CFAOCI_backtest_equity.csv", "text/csv")
 if __name__ == "__main__":
     main()
+
 
 
 
