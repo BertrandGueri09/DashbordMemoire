@@ -606,8 +606,6 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 # --------------------------- APP ---------------------------
 def main():
     st.title("Dashboard Marchés Boursiers - BRVM")
-    st.caption("Graphique Dividend Yield & PER déplacé sous le graphique technique. Colonne droite : fondamentaux + synthèse lisible.")
-
     # ===== SIDEBAR =====
     with st.sidebar:
         st.header("Données prix")
@@ -690,7 +688,7 @@ def main():
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("CSV DPS par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("CSV EPS (ou Résultat net)", type=['csv'], key="eps_csv")
-        st.caption("Année = Annee/Année/Year/period ; Valeur = DPS | EPS | net_income (FCFA).")
+        st.caption("Année = Année ; Valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
@@ -706,7 +704,6 @@ def main():
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
-        st.info(f"DPS chargés par défaut : {DEFAULT_DPS_PATH}")
     else:
         dps_df = None
 
@@ -714,7 +711,6 @@ def main():
         eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
     elif os.path.exists(DEFAULT_EPS_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_EPS_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"EPS chargés par défaut : {DEFAULT_EPS_PATH}")
     elif os.path.exists(DEFAULT_NET_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_NET_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
         st.info(f"Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
@@ -817,3 +813,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
