@@ -81,42 +81,13 @@ def set_fig_template(fig: go.Figure, light_theme: bool):
     # Gère aussi les couleurs de fond pour une meilleure intégration
     if light_theme:
         fig.update_layout(template="plotly",
-                          paper_bgcolor="white", plot_bgcolor="#f4f4f4",
+                          paper_bgcolor="#f4f4f4", plot_bgcolor="#f4f4f4",
                           font=dict(color="#000000"))
     else:
         fig.update_layout(template="plotly_dark",
                           paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                           font=dict(color="#e8e6e3"))
 
-def fig_to_png_bytes(fig: go.Figure, scale: float = 2.0) -> Optional[bytes]:
-    """Retourne des bytes PNG si kaleido est disponible, sinon None."""
-    try:
-        return fig.to_image(format="png", scale=scale)
-    except Exception:
-        return None
-
-def download_png_buttons(figures: List[Tuple[str, go.Figure]], light_theme: bool, col_count: int = 3):
-    """Affiche des boutons de téléchargement PNG pour une liste (label, figure)."""
-    rows = (len(figures) + col_count - 1) // col_count
-    idx = 0
-    for _ in range(rows):
-        cols = st.columns(col_count)
-        for c in cols:
-            if idx >= len(figures): break
-            label, f = figures[idx]
-            set_fig_template(f, light_theme)
-            png_bytes = fig_to_png_bytes(f, scale=2.0)
-            if png_bytes is not None:
-                c.download_button(
-                    f"⬇️ PNG – {label}",
-                    data=png_bytes,
-                    file_name=f"{label.replace(' ', '_').lower()}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            else:
-                c.caption(f"⚠️ Export PNG indisponible (kaleido non installé) – utilisez l’icône caméra du menu Plotly.")
-            idx += 1
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -924,6 +895,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
