@@ -71,7 +71,7 @@ hr { margin: 0.5rem 0 0.6rem 0; }
   font-size: 0.95rem;
 }
 </style>
-
+"""
 DARK_CSS = """
 <style>
 body, .block-container { background-color: #0e1117; color: #e8e6e3; }
@@ -886,6 +886,7 @@ def main():
     
 if __name__ == "__main__":
     main()
+
 
 
 
