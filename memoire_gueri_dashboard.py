@@ -26,10 +26,10 @@ st.set_page_config(
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
 # Fichiers par défaut
-DEFAULT_PRICE_PATH = "CFAOCI_filtre.csv"
-DEFAULT_DPS_PATH   = "dps_exemple.csv"
-DEFAULT_EPS_PATH   = "eps_exemple.csv"
-DEFAULT_NET_PATH   = "net_income_exemple.csv"
+DEFAULT_PRICE_PATH = "/mnt/data/CFAOCI_filtre.csv"
+DEFAULT_DPS_PATH   = "/mnt/data/dps_exemple.csv"
+DEFAULT_EPS_PATH   = "/mnt/data/eps_exemple.csv"
+DEFAULT_NET_PATH   = "/mnt/data/net_income_exemple.csv"
 
 # ===== CSS de base (compact) =====
 BASE_CSS = """
@@ -75,14 +75,14 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 
 LIGHT_CSS = """
 <style>
-body, .block-container { background-color: #77b5fe; color: #111; }
+body, .block-container { background-color: #ffffff; color: #111; }
 .app-subtitle { color: #444; }
 </style>
 """
 
 DARK_CSS = """
 <style>
-body, .block-container { background-color: #0e1117 ; color: #e8e6e3; }
+body, .block-container { background-color: #0e1117; color: #e8e6e3; }
 .small-note { color: #c9c7c4; }
 .app-subtitle { color: #c9c7c4; }
 </style>
@@ -102,12 +102,40 @@ def centered_title(main: str, sub: str = ""):
 def set_fig_template(fig: go.Figure, light_theme: bool):
     if light_theme:
         fig.update_layout(template="plotly",
-                          paper_bgcolor="white", plot_bgcolor="#f4f4f4",
-                          font=dict(color="#000000"))
+                          paper_bgcolor="white", plot_bgcolor="white",
+                          font=dict(color="#222"))
     else:
         fig.update_layout(template="plotly_dark",
                           paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                           font=dict(color="#e8e6e3"))
+
+def fig_to_png_bytes(fig: go.Figure, scale: float = 2.0) -> Optional[bytes]:
+    try:
+        return fig.to_image(format="png", scale=scale)
+    except Exception:
+        return None
+
+def download_png_buttons(figures: List[Tuple[str, go.Figure]], light_theme: bool, col_count: int = 3):
+    rows = (len(figures) + col_count - 1) // col_count
+    idx = 0
+    for _ in range(rows):
+        cols = st.columns(col_count)
+        for c in cols:
+            if idx >= len(figures): break
+            label, f = figures[idx]
+            set_fig_template(f, light_theme)
+            png_bytes = fig_to_png_bytes(f, scale=2.0)
+            if png_bytes is not None:
+                c.download_button(
+                    f"⬇️ PNG – {label}",
+                    data=png_bytes,
+                    file_name=f"{label.replace(' ', '_').lower()}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+            else:
+                c.caption("⚠️ Export PNG indisponible (kaleido non installé) – utilisez l’icône caméra du menu Plotly.")
+            idx += 1
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -691,26 +719,26 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 def main():
     # ======= Thème depuis la sidebar (appliqué avant tout rendu) =======
     with st.sidebar:
-        light_theme = st.toggle("Thème", value=True)
+        light_theme = st.toggle("🎨 Thème clair", value=True)
     apply_theme_css(light_theme)
 
     # ======= Titre centré (corrigé) =======
     centered_title("Dashboard Marchés Boursiers – BRVM",
-                   "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests")
+                   "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests & exports PNG")
 
     # ===== SIDEBAR (suite) =====
     with st.sidebar:
         st.header("Données prix")
-        uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
+        uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
         if uploader is not None:
             df_original = load_data(uploader)
-            st.success("Données de prix chargées")
+            st.success("✅ Données de prix chargées depuis l’upload.")
         else:
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
-                st.info(f"Données de prix par défaut : {DEFAULT_PRICE_PATH}")
+                st.info(f"ℹ️ Données de prix par défaut : {DEFAULT_PRICE_PATH}")
             else:
-                st.error("Aucun fichier de prix. Importez un CSV")
+                st.error("❌ Aucun fichier de prix. Importez un CSV ou placez /mnt/data/CFAOCI_filtre.csv")
                 st.stop()
 
         shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
@@ -797,6 +825,7 @@ def main():
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
+        st.info(f"ℹ️ DPS par défaut : {DEFAULT_DPS_PATH}")
     else:
         dps_df = None
 
@@ -804,8 +833,10 @@ def main():
         eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
     elif os.path.exists(DEFAULT_EPS_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_EPS_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
+        st.info(f"ℹ️ EPS par défaut : {DEFAULT_EPS_PATH}")
     elif os.path.exists(DEFAULT_NET_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_NET_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
+        st.info(f"ℹ️ Résultat net par défaut : {DEFAULT_NET_PATH}")
     else:
         eps_or_net_df = None
 
@@ -894,6 +925,19 @@ def main():
     eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
     set_fig_template(eq_fig, light_theme)
     st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
+
+    # ===== 8) EXPORTS PNG regroupés =====
+    st.subheader("Exports PNG")
+    figs_to_export = [("graphique_technique", tech_fig)]
+    if extra_fig is not None:
+        figs_to_export.append(("dividend_yield_pe", extra_fig))
+    if (ann_df is not None) and (not ann_df.empty):
+        figs_to_export.append(("fondamentaux_marche", fund_fig))
+    figs_to_export.append(("backtest_equity", eq_fig))
+    download_png_buttons(figs_to_export, light_theme, col_count=3)
+
+    st.markdown("---")
+    st.info("Astuce : si l’export PNG ne fonctionne pas (kaleido manquant), utilisez l’icône caméra dans le menu Plotly (coin supérieur droit des graphes).")
+
 if __name__ == "__main__":
     main()
-
