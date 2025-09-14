@@ -761,7 +761,7 @@ def main():
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("Dividendes par action (DPS) par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("EPS (ou Résultat net) par année", type=['csv'], key="eps_csv")
-        st.caption("Colonnes attendues : année = Annee/Année/Year/period ; valeur = DPS | EPS | net_income (FCFA).")
+        st.caption("Colonnes attendues : année = Année ; valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
         manual_dps = st.number_input("DPS (dernière année) – optionnel", min_value=0.0, value=0.0, step=1.0, help="Dividende par action en FCFA pour la dernière année de la plage.")
@@ -885,6 +885,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
