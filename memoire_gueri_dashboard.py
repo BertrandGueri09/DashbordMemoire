@@ -1,6 +1,9 @@
 # memoire_gueri_dashboard.py
 # -------------------------------------------------------------
-# Dashboard CFAOCI - BRVM (layout optimisé : pas d'espace vide à droite)
+# Dashboard CFAOCI - BRVM (layout optimisé)
+# - Graphique "Dividend Yield & PER" déplacé SOUS le graphique technique (gauche)
+# - La colonne de droite affiche les graphiques fondamentaux + synthèse textuelle
+# - Polices/marges resserrées pour éviter le chevauchement quand la sidebar est ouverte
 # -------------------------------------------------------------
 
 import streamlit as st
@@ -25,14 +28,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# CSS pour réduire les marges/blancs
+# ===== CSS : réduire les blancs, metrics plus petites, texte lisible =====
 st.markdown("""
 <style>
-    .block-container {padding-top: 0.8rem; padding-bottom: 0.6rem;}
-    section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem;}
-    div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
-    div[data-testid="stHorizontalBlock"] {gap: 0.6rem;}
-    .element-container:has(.stPlotlyChart) {margin-bottom: 0.4rem;}
+/* Conteneur principal plus compact */
+.block-container {padding-top: 0.7rem; padding-bottom: 0.7rem;}
+section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem;}
+/* Espacement entre blocs */
+div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
+div[data-testid="stHorizontalBlock"] {gap: 0.6rem;}
+/* Graphiques collent au conteneur */
+.element-container:has(.stPlotlyChart) {margin-bottom: 0.4rem;}
+/* Réduire taille de police des métriques (titre & valeur) */
+[data-testid="stMetric"] div {font-size: 0.88rem;}            /* libellé */
+[data-testid="stMetricValue"] {font-size: 1.2rem !important;}  /* valeur */
+[data-testid="stMetricDelta"] {font-size: 0.8rem !important;}  /* delta */
+@media (max-width: 1600px) {
+  [data-testid="stMetricValue"] {font-size: 1.05rem !important;}
+}
+/* Listes + paragraphes mieux espacés */
+p, li { line-height: 1.35; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -44,7 +59,7 @@ DEFAULT_DPS_PATH   = "dps_exemple.csv"
 DEFAULT_EPS_PATH   = "eps_exemple.csv"
 DEFAULT_NET_PATH   = "net_income_exemple.csv"
 
-# --------------------------- HELPERS ROBUSTES ---------------------------
+# --------------------------- HELPERS ---------------------------
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
     if df is None or df.empty:
         return None
@@ -253,6 +268,9 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
     return fig
 
 # --------------------------- BACKTESTS ---------------------------
+def _annualization_factor(freq_code: str) -> float:
+    return {'D': 252.0, 'W': 52.0, 'M': 12.0}.get(freq_code, 252.0)
+
 def backtest_sma(df, fast=20, slow=50, fee_bps=10.0, cash0=1_000_000.0):
     data = df[['Date','Close']].copy()
     data['SMA_fast'] = calculate_sma(data['Close'], fast)
@@ -384,7 +402,7 @@ def backtest_mixed_sma_rsi(df, sma_fast=20, sma_slow=50, rsi_window=14, rsi_ente
     trades_df = pd.DataFrame(trades, columns=['Date','Action','Prix','Quantite'])
     return data, stats, trades_df
 
-# --------------------------- FONDAMENTAUX (AUTO) ---------------------------
+# --------------------------- FONDAMENTAUX ---------------------------
 @st.cache_data
 def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, shares_outstanding: int) -> pd.DataFrame:
     if df_original_daily.empty:
@@ -416,7 +434,6 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
     ann = ann.reset_index(drop=True)
     ann.insert(0, 'Annee', years)
 
-    # Arrondis
     ann['last_price'] = ann['last_price'].round(2)
     ann['avg_price'] = ann['avg_price'].round(2)
     ann['vol_sum'] = ann['vol_sum'].round(0).astype('Int64')
@@ -492,7 +509,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
 
     if 'EPS' not in out.columns: out['EPS'] = np.nan
 
-    # Estimation via DPS + payout (si fourni manuellement pour la dernière année)
+    # Estimation via DPS + payout (dernière année)
     if manual_dps is not None and manual_payout_pct is not None and len(out) > 0:
         try:
             last_year = int(out['Annee'].max())
@@ -550,7 +567,7 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
         fig.update_yaxes(title_text="x", row=1, col=2)
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
-    fig.update_layout(height=420, showlegend=False, margin=dict(t=26, b=18, l=24, r=10))
+    fig.update_layout(height=380, showlegend=False, margin=dict(t=26, b=18, l=24, r=10))
     return fig
 
 def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
@@ -588,23 +605,22 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 
 # --------------------------- APP ---------------------------
 def main():
-    st.title("📈 Dashboard CFAOCI - BRVM")
-    st.caption("Mise en page optimisée : la colonne de droite occupe toute la largeur disponible, sans espace perdu.")
+    st.title("Dashboard Marchés Boursiers - BRVM")
+    st.caption("Graphique Dividend Yield & PER déplacé sous le graphique technique. Colonne droite : fondamentaux + synthèse lisible.")
 
+    # ===== SIDEBAR =====
     with st.sidebar:
         st.header("Données prix")
-        uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
-
-        # Prix : upload > défaut
+        uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
         if uploader is not None:
             df_original = load_data(uploader)
-            st.success("✅ Données de prix chargées depuis l’upload.")
+            st.success("Données de prix chargées")
         else:
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
-                st.info(f"ℹ️ Données de prix chargées par défaut : {DEFAULT_PRICE_PATH}")
+                st.info(f"Données de prix chargées par défaut : {DEFAULT_PRICE_PATH}")
             else:
-                st.error("❌ Aucun fichier de prix. Importez un CSV ou placez /mnt/data/CFAOCI_filtre.csv")
+                st.error("Aucun fichier de prix. Importez un CSV")
                 st.stop()
 
         shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
@@ -680,7 +696,7 @@ def main():
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
         manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
-    # ====== TRAITEMENTS ======
+    # ===== TRAITEMENTS =====
     df = add_indicators(resample_ohlcv(df_view, freq_code=freq_code), params)
     metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
 
@@ -690,7 +706,7 @@ def main():
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
-        st.info(f"ℹ️ DPS chargés par défaut : {DEFAULT_DPS_PATH}")
+        st.info(f"DPS chargés par défaut : {DEFAULT_DPS_PATH}")
     else:
         dps_df = None
 
@@ -698,10 +714,10 @@ def main():
         eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
     elif os.path.exists(DEFAULT_EPS_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_EPS_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"ℹ️ EPS chargés par défaut : {DEFAULT_EPS_PATH}")
+        st.info(f"EPS chargés par défaut : {DEFAULT_EPS_PATH}")
     elif os.path.exists(DEFAULT_NET_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_NET_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"ℹ️ Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
+        st.info(f"Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
     else:
         eps_or_net_df = None
 
@@ -713,7 +729,7 @@ def main():
     span = _year_span(ann_df)
     fund_title_suffix = f"({span[0]}–{span[1]})" if span else "(n/a)"
 
-    # ====== AFFICHAGE PRINCIPAL (2 colonnes 50/50) ======
+    # ===== AFFICHAGE : métriques compactes =====
     st.subheader("Métriques principales")
     badge = {"D":"Jour","W":"Semaine","M":"Mois"}[freq_code]
     m1,m2,m3,m4,m5,m6 = st.columns(6)
@@ -725,7 +741,7 @@ def main():
     m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
     st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
-    # Colonnes 50/50 pour éviter l'espace blanc
+    # ===== COLONNES : gauche = technique (+ Dividend Yield & PER) / droite = fondamentaux + synthèse =====
     left, right = st.columns([1, 1], gap="small")
 
     with left:
@@ -733,15 +749,21 @@ def main():
         fig = plotly_combined_chart(df, chart_type, params)
         st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
 
+        # ⬇️ Déplacement ici du graphique Dividend Yield & PER
+        extra_fig = plot_dividend_and_pe(ann_df)
+        if extra_fig is not None:
+            st.subheader("Dividend Yield & PER")
+            st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
+
     with right:
         st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
         if (ann_df is not None) and (not ann_df.empty):
             fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
-            extra_fig = plot_dividend_and_pe(ann_df)
-            if extra_fig is not None:
-                st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
+
+            # ➜ Remplacement : synthèse textuelle à la place de l'ancien emplacement du graphique Dividend
             st.markdown(summarize_fundamentals(ann_df))
+
             fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
             st.download_button(
                 f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
@@ -751,6 +773,7 @@ def main():
         else:
             st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
 
+    # ===== BACKTEST =====
     st.subheader(f"Backtesting — {strat}")
     if strat == "SMA Crossover":
         bt_df, bt_stats, bt_trades = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
@@ -790,7 +813,7 @@ def main():
                            "CFAOCI_backtest_equity.csv", "text/csv")
 
     st.markdown("---")
-    st.info("La mise en page a été compactée : marges réduites, colonnes 50/50 et graphiques étendus pour éviter tout ‘trou’ visuel sur la droite.")
+    st.info("Mise en page compacte : Dividend Yield sous le graphique technique ; textes et métriques redimensionnés pour une lecture confortable même avec la sidebar.")
 
 if __name__ == "__main__":
     main()
