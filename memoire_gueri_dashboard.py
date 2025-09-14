@@ -675,7 +675,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
     if last_mdd is not None: lines.append(f"- **Max Drawdown intra-année {last_year}** : {last_mdd:.2f} %")
     if vol_mean is not None: lines.append(f"- **Volume annuel moyen (titres)** : {vol_mean:,.0f}")
     if cagr is not None: lines.append(f"- **CAGR ({first_year}→{last_year})** : {100*cagr:.2f} % / an")
-    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield)::.2f} %")
+    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield):.2f} %")
     if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {float(div_total):,.0f} FCFA")
     if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
     lines.append("> Capi = prix fin d’année × actions. EPS fourni/calculé ou estimé via DPS & payout ratio.")
@@ -941,4 +941,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
