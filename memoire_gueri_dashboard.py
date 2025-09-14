@@ -1,15 +1,13 @@
 # memoire_gueri_dashboard.py
 # -------------------------------------------------------------
-# Dashboard CFAOCI - BRVM (avec fichiers par défaut auto)
-# - Charge par défaut (si présents) :
-#   /mnt/data/CFAOCI_filtre.csv, /mnt/data/dps_exemple.csv,
-#   /mnt/data/eps_exemple.csv, /mnt/data/net_income_exemple.csv
-# - L'utilisateur peut importer d'autres fichiers qui écrasent les valeurs par défaut.
+# Dashboard CFAOCI - BRVM (pleine largeur, marges réduites)
+# - Fichiers par défaut auto : /mnt/data/CFAOCI_filtre.csv, /mnt/data/dps_exemple.csv,
+#   /mnt/data/eps_exemple.csv, /mnt/data/net_income_exemple.csv (écrasés si upload)
 # - Analyse technique (fréquences, chandelles, indicateurs)
 # - Backtests (SMA, RSI+MACD, Mixte)
-# - Fondamentaux de marché dynamiques (plage annuelle calculée depuis les prix)
-# - Intégration DPS/EPS/Net Income (fichiers ou saisie manuelle) → Dividend Yield, Dividendes totaux, PER
-# - Graphes fondamentaux + Graphe Dividend Yield & PER
+# - Fondamentaux de marché dynamiques (plage annuelle depuis les prix)
+# - DPS/EPS/Net (fichiers ou saisie) → Dividend Yield, Dividendes totaux, PER
+# - Graphes fondamentaux optimisés (marges réduites) + Graphe Dividend Yield & PER
 # -------------------------------------------------------------
 
 import streamlit as st
@@ -34,17 +32,37 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# CSS : pleine largeur, padding réduit
+st.markdown("""
+<style>
+/* Étendre vraiment la zone utile */
+.main .block-container{
+  max-width: 98vw;
+  padding-left: 1.2rem;
+  padding-right: 1.2rem;
+}
+
+/* Réduire l'espace vertical global */
+section[data-testid="stSidebar"] .block-container{
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+
+/* Reserrer les titres */
+h1, h2, h3 { margin-bottom: 0.35rem; }
+</style>
+""", unsafe_allow_html=True)
+
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
 # Emplacements par défaut
-DEFAULT_PRICE_PATH = "CFAOCI_filtre.csv"
-DEFAULT_DPS_PATH = "dps_exemple.csv"
-DEFAULT_EPS_PATH = "eps_exemple.csv"
-DEFAULT_NET_PATH = "net_income_exemple.csv"
+DEFAULT_PRICE_PATH = "/mnt/data/CFAOCI_filtre.csv"
+DEFAULT_DPS_PATH   = "/mnt/data/dps_exemple.csv"
+DEFAULT_EPS_PATH   = "/mnt/data/eps_exemple.csv"
+DEFAULT_NET_PATH   = "/mnt/data/net_income_exemple.csv"
 
 # --------------------------- HELPERS ROBUSTES ---------------------------
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
-    """Détecte la colonne année dans df ('Annee', 'Année', 'Year', 'year', 'period' ou index)."""
     if df is None or df.empty:
         return None
     candidates = ['Annee', 'Année', 'Year', 'year', 'period']
@@ -83,7 +101,6 @@ def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
 def load_data(path_or_buffer: Union[str, io.BytesIO]) -> pd.DataFrame:
-    """Charger des prix BRVM (CSV) avec parsing robuste FR (virgules, espaces, K/M)."""
     df = pd.read_csv(path_or_buffer)
     df.columns = df.columns.str.strip()
 
@@ -122,11 +139,7 @@ def load_data(path_or_buffer: Union[str, io.BytesIO]) -> pd.DataFrame:
         if suf == 'm': val *= 1_000_000
         return val
 
-    if 'Volume' in df.columns:
-        df['Volume'] = df['Volume'].apply(parse_volume)
-    else:
-        df['Volume'] = 0.0
-
+    df['Volume'] = df['Volume'].apply(parse_volume) if 'Volume' in df.columns else 0.0
     if 'Variation' in df.columns:
         df['Variation'] = df['Variation'].apply(to_num)
 
@@ -173,7 +186,7 @@ def bollinger_bands(prices: pd.Series, window: int = 20, n_std: float = 2.0):
 
 def macd(prices: pd.Series, fast=12, slow=26, signal=9):
     ema_fast = calculate_ema(prices, fast)
-    ema_slow = calculate_ema(prices, slow)
+    ema_slow  = calculate_ema(prices, slow)
     macd_line = ema_fast - ema_slow
     signal_line = macd_line.ewm(span=signal, adjust=False, min_periods=1).mean()
     hist = macd_line - signal_line
@@ -229,11 +242,21 @@ def add_indicators(df: pd.DataFrame, params: Dict) -> pd.DataFrame:
         df['MACD_L'], df['MACD_S'], df['MACD_H'] = macd_l, macd_s, macd_h
     return df
 
+def _tight_margins(fig: go.Figure, height: int):
+    fig.update_layout(
+        height=height,
+        margin=dict(t=30, b=20, l=10, r=10),
+        hovermode='x unified',
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0)
+    )
+    return fig
+
 def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go.Figure:
     rows = 1 + int(params.get('show_rsi')) + int(params.get('show_macd'))
-    row_heights = [1.0] if rows==1 else ([0.7, 0.3] if rows==2 else [0.6, 0.2, 0.2])
+    row_heights = [1.0] if rows==1 else ([0.72, 0.28] if rows==2 else [0.6, 0.2, 0.2])
     titles = ['Prix & Volume'] + (['RSI'] if params.get('show_rsi') else []) + (['MACD'] if params.get('show_macd') else [])
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.02, row_heights=row_heights, subplot_titles=titles)
+    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.015, row_heights=row_heights, subplot_titles=titles)
 
     if chart_type == 'Chandelles':
         fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Cours'), row=1, col=1)
@@ -253,21 +276,20 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
     current_row = 2
     if params.get('show_rsi'):
         fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', mode='lines'), row=current_row, col=1)
-        fig.add_shape(type="line", xref=f"x{current_row}", yref=f"y{current_row}",
-                      x0=df['Date'].min(), x1=df['Date'].max(), y0=70, y1=70, line=dict(dash="dash", width=1, color="red"))
-        fig.add_shape(type="line", xref=f"x{current_row}", yref=f"y{current_row}",
-                      x0=df['Date'].min(), x1=df['Date'].max(), y0=50, y1=50, line=dict(dash="dot", width=1, color="gray"))
-        fig.add_shape(type="line", xref=f"x{current_row}", yref=f"y{current_row}",
-                      x0=df['Date'].min(), x1=df['Date'].max(), y0=30, y1=30, line=dict(dash="dash", width=1, color="green"))
+        # repères
+        for yv, dash, col in [(70, "dash", "red"), (50, "dot", "gray"), (30, "dash", "green")]:
+            fig.add_shape(type="line", xref=f"x{current_row}", yref=f"y{current_row}",
+                          x0=df['Date'].min(), x1=df['Date'].max(), y0=yv, y1=yv,
+                          line=dict(dash=dash, width=1, color=col))
         current_row += 1
     if params.get('show_macd'):
         fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_L'], name='MACD', mode='lines'), row=current_row, col=1)
         fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_S'], name='Signal', mode='lines'), row=current_row, col=1)
         fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.6), row=current_row, col=1)
 
-    fig.update_layout(height=600, hovermode='x unified', showlegend=True,
-                      legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-                      margin=dict(t=40, b=40, l=40, r=40))
+    # Marges serrées & hauteur adaptée
+    height = 540 if rows == 1 else (600 if rows == 2 else 660)
+    _tight_margins(fig, height)
     return fig
 
 # --------------------------- BACKTESTS ---------------------------
@@ -443,7 +465,6 @@ def backtest_mixed_sma_rsi(df: pd.DataFrame, sma_fast=20, sma_slow=50, rsi_windo
 # --------------------------- FONDAMENTAUX (AUTO) ---------------------------
 @st.cache_data
 def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, shares_outstanding: int) -> pd.DataFrame:
-    """Calcule fondamentaux annuels (prix fin d’année, rendement, vol annualisée, volume, MDD, capi)."""
     if df_original_daily.empty:
         return pd.DataFrame()
 
@@ -486,7 +507,6 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
     return ann
 
 def _parse_year_value_df(uploaded: io.BytesIO, value_cols_candidates: List[str]) -> Optional[pd.DataFrame]:
-    """Lit un CSV avec colonne année + colonne valeur (ex: DPS / EPS / net_income)."""
     try:
         df = pd.read_csv(uploaded)
     except Exception:
@@ -527,7 +547,6 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame,
                               eps_or_net_df: Optional[pd.DataFrame],
                               manual_dps: Optional[float],
                               manual_payout_pct: Optional[float]) -> pd.DataFrame:
-    """Ajoute DPS, EPS (ou calcule via net_income), Dividend Yield, Dividends Total, PER."""
     if ann_df is None or ann_df.empty:
         return ann_df
     out = ann_df.copy()
@@ -595,10 +614,12 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame,
 def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
-    fig = make_subplots(rows=2, cols=2,
-                        subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)',
-                                        'Volatilité annualisée (%)', 'Volume annuel (titres)'],
-                        vertical_spacing=0.20, horizontal_spacing=0.12)
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)',
+                        'Volatilité annualisée (%)', 'Volume annuel (titres)'],
+        vertical_spacing=0.12, horizontal_spacing=0.08
+    )
     fig.add_trace(go.Bar(x=x, y=ann_df['market_cap_fin_annee_FCFA'], name='Capi fin année'), row=1, col=1)
     fig.add_trace(go.Scatter(x=x, y=ann_df['annual_return_%'], name='Rendement annuel', mode='lines+markers'), row=1, col=2)
     fig.add_trace(go.Scatter(x=x, y=ann_df['vol_annual_%'], name='Vol annualisée', mode='lines+markers'), row=2, col=1)
@@ -607,7 +628,8 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(title_text="%", row=1, col=2)
     fig.update_yaxes(title_text="%", row=2, col=1)
     fig.update_yaxes(title_text="Titres", row=2, col=2)
-    fig.update_layout(height=520, showlegend=False, margin=dict(t=90, b=60, l=60, r=60))
+    fig.update_layout(showlegend=False)
+    _tight_margins(fig, height=460)
     return fig
 
 def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
@@ -616,11 +638,11 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
     year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
     has_yield = 'Dividend_Yield_%' in ann_df.columns and ann_df['Dividend_Yield_%'].notna().any()
-    has_per = 'PER' in ann_df.columns and ann_df['PER'].notna().any()
+    has_per   = 'PER' in ann_df.columns and ann_df['PER'].notna().any()
     if not has_yield and not has_per:
         return None
     fig = make_subplots(rows=1, cols=2, subplot_titles=['Dividend Yield (%)', 'PER (x)'],
-                        shared_xaxes=False, vertical_spacing=0.10, horizontal_spacing=0.12)
+                        shared_xaxes=False, vertical_spacing=0.05, horizontal_spacing=0.08)
     if has_yield:
         fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)'), row=1, col=1)
         fig.update_yaxes(title_text="%", row=1, col=1)
@@ -629,7 +651,8 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
         fig.update_yaxes(title_text="x", row=1, col=2)
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
-    fig.update_layout(height=360, showlegend=False, margin=dict(t=70, b=50, l=60, r=60))
+    fig.update_layout(showlegend=False)
+    _tight_margins(fig, height=320)
     return fig
 
 def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
@@ -655,7 +678,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
         cagr = (last_price / first_price) ** (1 / n_years) - 1
     div_yield = ann_df['Dividend_Yield_%'].iloc[-1] if 'Dividend_Yield_%' in ann_df.columns else None
     div_total = ann_df['Dividends_Total_FCFA'].iloc[-1] if 'Dividends_Total_FCFA' in ann_df.columns else None
-    per_last = ann_df['PER'].iloc[-1] if 'PER' in ann_df.columns else None
+    per_last  = ann_df['PER'].iloc[-1] if 'PER' in ann_df.columns else None
     lines = []
     lines.append(f"**Synthèse fondamentale ({first_year}–{last_year})**")
     lines.append(f"- **Prix fin {last_year}** : {last_price:,.2f} FCFA")
@@ -667,27 +690,29 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
     if cagr is not None: lines.append(f"- **CAGR ({first_year}→{last_year})** : {100*cagr:.2f} % / an")
     if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield):.2f} %")
     if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {float(div_total):,.0f} FCFA")
-    if pd.notna(per_last): lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
+    if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
     lines.append("> Capi = prix fin d’année × actions. EPS : fourni/calculé, ou estimé via DPS & payout ratio.")
     return "\n".join(lines)
 
 # --------------------------- APP ---------------------------
 def main():
     st.title("Dashboard Marchés Boursiers - BRVM")
-    with st.sidebar:
-        st.header("Données prix")
-        uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
+    st.caption("Affichage pleine largeur optimisé. Les fichiers par défaut de /mnt/data sont chargés automatiquement s’ils existent, sinon vous pouvez importer vos propres fichiers.")
 
-        # Charger PRIX : d'abord upload, sinon fallback sur DEFAULT_PRICE_PATH
+    with st.sidebar:
+        st.header("Données prix (par défaut si présent)")
+        uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
+
+        # Charger PRIX : upload prioritaire, sinon fallback sur DEFAULT_PRICE_PATH
         if uploader is not None:
             df_original = load_data(uploader)
             st.success("Données de prix chargées depuis le fichier importé.")
         else:
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
-                st.info(f"Données de prix chargées par défaut : {DEFAULT_PRICE_PATH}")
+                st.info(f"ℹDonnées de prix chargées par défaut : {DEFAULT_PRICE_PATH}")
             else:
-                st.error("Aucun fichier de prix. Importez un CSV de prix")
+                st.error("Aucun fichier de prix. Importez un CSV de prix ")
                 st.stop()
 
         shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
@@ -737,7 +762,7 @@ def main():
             colb1, colb2, colb3 = st.columns(3)
             with colb1: bt_fast = st.number_input("MM rapide", min_value=2, max_value=200, value=20, step=1)
             with colb2: bt_slow = st.number_input("MM lente", min_value=5, max_value=400, value=50, step=1)
-            with colb3: bt_fee = st.number_input("Frais (bps)", min_value=0.0, max_value=200.0, value=10.0, step=1.0)
+            with colb3: bt_fee  = st.number_input("Frais (bps)", min_value=0.0, max_value=200.0, value=10.0, step=1.0)
         elif strat == "RSI + MACD":
             colb1, colb2, colb3 = st.columns(3)
             with colb1: bt_rsi_buy = st.slider("RSI sous-achat (entrée possible)", 10, 40, 30, 1)
@@ -755,30 +780,29 @@ def main():
             with colb3: mix_fee = st.number_input("Frais (bps)", min_value=0.0, max_value=200.0, value=10.0, step=1.0)
             colb4, colb5 = st.columns(2)
             with colb4: mix_rsi_enter = st.slider("RSI entrée", 40, 70, 55, 1)
-            with colb5: mix_rsi_exit = st.slider("RSI sortie", 20, 60, 45, 1)
+            with colb5: mix_rsi_exit  = st.slider("RSI sortie", 20, 60, 45, 1)
 
-        # --------- Dividendes & Bénéfices (fichiers par défaut + upload) ---------
+        # --------- Dividendes & Bénéfices ---------
         st.header("Dividendes & Bénéfices (facultatif)")
-        dps_uploader = st.file_uploader("Dividendes par action (DPS) par année", type=['csv'], key="dps_csv")
-        eps_uploader = st.file_uploader("EPS (ou Résultat net) par année", type=['csv'], key="eps_csv")
-        st.caption("Colonnes attendues : année = Année ; valeur = DPS | EPS | net_income (FCFA).")
-
+        dps_uploader = st.file_uploader("CSV Dividendes par action (DPS) par année", type=['csv'], key="dps_csv")
+        eps_uploader = st.file_uploader("CSV EPS (ou Résultat net) par année", type=['csv'], key="eps_csv")
+        st.caption("Colonnes attendues : Annee/Année/Year/period + valeur = DPS | EPS | net_income (FCFA).")
         st.subheader("Saisie manuelle (si pas de fichiers)")
-        manual_dps = st.number_input("DPS (dernière année) – optionnel", min_value=0.0, value=0.0, step=1.0, help="Dividende par action en FCFA pour la dernière année de la plage.")
-        manual_payout = st.number_input("Payout ratio (%) – optionnel", min_value=0.0, max_value=100.0, value=0.0, step=1.0, help="Si renseigné avec DPS, permet d'estimer l'EPS et donc le PER.")
+        manual_dps = st.number_input("DPS (dernière année) – optionnel", min_value=0.0, value=0.0, step=1.0)
+        manual_payout = st.number_input("Payout ratio (%) – optionnel", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
     # ====== TRAITEMENTS ======
     df = add_indicators(resample_ohlcv(df_view, freq_code=freq_code), params)
     metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
 
-    # Fondamentaux annuels depuis PRIX (non filtrés)
     ann_df = compute_market_fundamentals_from_original(df_original, shares)
 
-    # DPS/EPS/Net Income : upload prioritaire, sinon fichiers par défaut s'ils existent
+    # DPS/EPS/Net : upload prioritaire, sinon fichiers par défaut
     if dps_uploader is not None:
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
+        st.info(f"ℹ️ DPS chargés par défaut : {DEFAULT_DPS_PATH}")
     else:
         dps_df = None
 
@@ -786,9 +810,10 @@ def main():
         eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
     elif os.path.exists(DEFAULT_EPS_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_EPS_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
+        st.info(f"ℹ️ EPS chargés par défaut : {DEFAULT_EPS_PATH}")
     elif os.path.exists(DEFAULT_NET_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_NET_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
+        st.info(f"ℹ️ Résultat net chargé par défaut : {DEFAULT_NET_PATH}")
     else:
         eps_or_net_df = None
 
@@ -810,9 +835,11 @@ def main():
     c4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
     c5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
     c6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
-    st.caption(f"Période affichée (graphique technique) : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
+    st.caption(f"Période du graphique technique : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
-    left, right = st.columns([3, 2])
+    # Colonnes pleine largeur équilibrées (50/50)
+    left, right = st.columns(2)
+
     with left:
         st.subheader("Graphique technique")
         fig = plotly_combined_chart(df, chart_type, params)
@@ -867,7 +894,7 @@ def main():
 
     eq_fig = go.Figure()
     eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
-    eq_fig.update_layout(height=280, margin=dict(t=10,b=10,l=10,r=10))
+    _tight_margins(eq_fig, height=260)
     st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
 
     cdl1, cdl2 = st.columns(2)
@@ -880,12 +907,9 @@ def main():
 
     st.markdown("---")
     st.info(
-        "**Dès que vous importez un fichier, il remplace l’équivalent par défaut.** "
+        "Affichage pleine largeur activé. Capitalisation = prix fin d’année × actions (paramétrable). "
+        "DPS/EPS/Net income : upload prioritaire, sinon fichiers par défaut. Backtests à visée pédagogique."
     )
 
 if __name__ == "__main__":
     main()
-
-
-
-
