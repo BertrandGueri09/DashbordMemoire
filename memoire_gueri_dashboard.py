@@ -615,7 +615,7 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
     fig = make_subplots(
-        rows=2, cols=2,
+        rows=1, cols=2,
         subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)',
                         'Volatilité annualisée (%)', 'Volume annuel (titres)'],
         vertical_spacing=0.12, horizontal_spacing=0.08
@@ -913,4 +913,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
