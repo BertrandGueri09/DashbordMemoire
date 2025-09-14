@@ -75,7 +75,7 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 
 LIGHT_CSS = """
 <style>
-body, .block-container { background-color: #008080; color: #111; }
+body, .block-container { background-color: #ffffff; color: #111; }
 .app-subtitle { color: #444; }
 </style>
 """
@@ -102,7 +102,7 @@ def centered_title(main: str, sub: str = ""):
 def set_fig_template(fig: go.Figure, light_theme: bool):
     if light_theme:
         fig.update_layout(template="plotly",
-                          paper_bgcolor="#77b5fe", plot_bgcolor="#f4f4f4",
+                          paper_bgcolor="#white", plot_bgcolor="white",
                           font=dict(color="#000000"))
     else:
         fig.update_layout(template="plotly_dark",
@@ -898,6 +898,7 @@ def main():
     
 if __name__ == "__main__":
     main()
+
 
 
 
