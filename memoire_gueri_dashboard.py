@@ -71,14 +71,6 @@ hr { margin: 0.5rem 0 0.6rem 0; }
   font-size: 0.95rem;
 }
 </style>
-"""
-
-LIGHT_CSS = """
-<style>
-body, .block-container { background-color: #ffffff; color: #ffffff; }
-.app-subtitle { color: #444; }
-</style>
-"""
 
 DARK_CSS = """
 <style>
@@ -690,10 +682,6 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 
 # --------------------------- APP ---------------------------
 def main():
-    # ======= Thème depuis la sidebar (appliqué avant tout rendu) =======
-    with st.sidebar:
-        light_theme = st.toggle("Thème", value=True)
-    apply_theme_css(light_theme)
 
     # ======= Titre centré (corrigé) =======
     centered_title("Dashboard Marchés Boursiers – BRVM",
@@ -898,6 +886,7 @@ def main():
     
 if __name__ == "__main__":
     main()
+
 
 
 
