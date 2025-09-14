@@ -102,7 +102,7 @@ def centered_title(main: str, sub: str = ""):
 def set_fig_template(fig: go.Figure, light_theme: bool):
     if light_theme:
         fig.update_layout(template="plotly",
-                          paper_bgcolor="#white", plot_bgcolor="white",
+                          paper_bgcolor="white", plot_bgcolor="white",
                           font=dict(color="#000000"))
     else:
         fig.update_layout(template="plotly_dark",
@@ -898,6 +898,7 @@ def main():
     
 if __name__ == "__main__":
     main()
+
 
 
 
