@@ -597,8 +597,8 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 
 # --------------------------- APP ---------------------------
 def main():
-    
-    st.title(" Dashboard CFAOCI - BRVM")
+ st.markdown("---")
+    st.title("                    ## Dashboard CFAOCI - BRVM         ")
 
     # ===== SIDEBAR =====
     with st.sidebar:
@@ -826,11 +826,8 @@ def main():
     with cdl2:
         st.download_button("Équity (CSV)", bt_df[['Date','equity']].to_csv(index=False).encode('utf-8'),
                            "CFAOCI_backtest_equity.csv", "text/csv")
-
-    st.markdown("---")
-    st.info("Utilisez le toggle de la sidebar pour passer en mode 1 colonne sur petits écrans. Les polices et espacements sont optimisés pour éviter tout chevauchement.")
-
 if __name__ == "__main__":
     main()
+
 
 
