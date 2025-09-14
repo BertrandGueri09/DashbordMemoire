@@ -615,7 +615,7 @@ def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
     year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
     fig = make_subplots(
-        rows=1, cols=2,
+        rows=2, cols=2,
         subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)',
                         'Volatilité annualisée (%)', 'Volume annuel (titres)'],
         vertical_spacing=0.12, horizontal_spacing=0.08
@@ -647,7 +647,7 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
         fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)'), row=1, col=1)
         fig.update_yaxes(title_text="%", row=1, col=1)
     if has_per:
-        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)'), row=1, col=2)
+        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)'), row=1, col=1)
         fig.update_yaxes(title_text="x", row=1, col=2)
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
@@ -913,5 +913,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
