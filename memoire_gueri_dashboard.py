@@ -737,7 +737,7 @@ def main():
         apply_theme_css(light_theme)
         
      # ======= Titre centré (corrigé) =======
-    centered_title("Dashboard Marchés Boursiers – BRVM",
+        centered_title("Dashboard Marchés Boursiers – BRVM",
                    "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests & exports PNG")
 
     # ===== SIDEBAR =====
@@ -954,4 +954,5 @@ def main():
         
 if __name__ == "__main__":
     main()
+
 
