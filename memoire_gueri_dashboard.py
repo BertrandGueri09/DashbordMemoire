@@ -730,16 +730,18 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
 
 # --------------------------- APP ---------------------------
 def main():
+     # ===== SIDEBAR =====
+    with st.sidebar:
+        # Thème
+        light_theme = st.toggle("Thème", value=True)
+        apply_theme_css(light_theme)
+        
      # ======= Titre centré (corrigé) =======
     centered_title("Dashboard Marchés Boursiers – BRVM",
                    "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests & exports PNG")
 
     # ===== SIDEBAR =====
     with st.sidebar:
-        # Thème
-        light_theme = st.toggle("Thème", value=True)
-        apply_theme_css(light_theme)
-
         st.header("Données prix")
         uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
         if uploader is not None:
@@ -949,5 +951,7 @@ def main():
     with cdl2:
         st.download_button("Équity (CSV)", bt_df[['Date','equity']].to_csv(index=False).encode('utf-8'),
                            "CFAOCI_backtest_equity.csv", "text/csv")
+        
 if __name__ == "__main__":
     main()
+
