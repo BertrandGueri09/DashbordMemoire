@@ -48,10 +48,10 @@ p, li { line-height: 1.35; }
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
 # Fichiers par défaut
-DEFAULT_PRICE_PATH = "/mnt/data/CFAOCI_filtre.csv"
-DEFAULT_DPS_PATH   = "/mnt/data/dps_exemple.csv"
-DEFAULT_EPS_PATH   = "/mnt/data/eps_exemple.csv"
-DEFAULT_NET_PATH   = "/mnt/data/net_income_exemple.csv"
+DEFAULT_PRICE_PATH = "CFAOCI_filtre.csv"
+DEFAULT_DPS_PATH   = "dps_exemple.csv"
+DEFAULT_EPS_PATH   = "eps_exemple.csv"
+DEFAULT_NET_PATH   = "net_income_exemple.csv"
 
 # --------------------------- HELPERS ---------------------------
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
@@ -597,24 +597,23 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 
 # --------------------------- APP ---------------------------
 def main():
-    st.title("📈 Dashboard CFAOCI - BRVM")
-    st.caption("Toggle 'Mode compact (1 colonne)' pour petits écrans. Dividend Yield & PER sous le graphique technique.")
+    st.title("Dashboard CFAOCI - BRVM")
 
     # ===== SIDEBAR =====
     with st.sidebar:
         compact = st.toggle("Mode compact (1 colonne)", value=False)
 
         st.header("Données prix")
-        uploader = st.file_uploader("Importer le CSV de PRIX (ex: CFAOCI.csv)", type=['csv'], key="price_csv")
+        uploader = st.file_uploader("Importer le CSV de PRIX ", type=['csv'], key="price_csv")
         if uploader is not None:
             df_original = load_data(uploader)
-            st.success("✅ Données de prix chargées depuis l’upload.")
+            st.success("Données de prix chargées")
         else:
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
-                st.info(f"ℹ️ Données de prix par défaut : {DEFAULT_PRICE_PATH}")
+                st.info(f"Données de prix par défaut : {DEFAULT_PRICE_PATH}")
             else:
-                st.error("❌ Aucun fichier de prix. Importez un CSV ou placez /mnt/data/CFAOCI_filtre.csv")
+                st.error("Aucun fichier de prix. Importez un CSV")
                 st.stop()
 
         shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
@@ -684,7 +683,7 @@ def main():
         st.header("Dividendes & Bénéfices (facultatif)")
         dps_uploader = st.file_uploader("CSV DPS par année", type=['csv'], key="dps_csv")
         eps_uploader = st.file_uploader("CSV EPS (ou Résultat net)", type=['csv'], key="eps_csv")
-        st.caption("Année = Annee/Année/Year/period ; Valeur = DPS | EPS | net_income (FCFA).")
+        st.caption("Année =Année ; Valeur = DPS | EPS | net_income (FCFA).")
 
         st.subheader("Saisie manuelle (si pas de fichiers)")
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
@@ -702,7 +701,7 @@ def main():
         dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
     elif os.path.exists(DEFAULT_DPS_PATH):
         dps_df = _parse_year_value_df(DEFAULT_DPS_PATH, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
-        st.info(f"ℹ️ DPS par défaut : {DEFAULT_DPS_PATH}")
+        
     else:
         dps_df = None
 
@@ -710,10 +709,10 @@ def main():
         eps_or_net_df = _parse_year_value_df(eps_uploader, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
     elif os.path.exists(DEFAULT_EPS_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_EPS_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"ℹ️ EPS par défaut : {DEFAULT_EPS_PATH}")
+        
     elif os.path.exists(DEFAULT_NET_PATH):
         eps_or_net_df = _parse_year_value_df(DEFAULT_NET_PATH, ['EPS','eps','net_income','resultat_net','rn','benefice','profit'])
-        st.info(f"ℹ️ Résultat net par défaut : {DEFAULT_NET_PATH}")
+        
     else:
         eps_or_net_df = None
 
@@ -832,3 +831,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
