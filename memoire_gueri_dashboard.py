@@ -922,14 +922,6 @@ def main():
         st.download_button("Équity (CSV)", bt_df[['Date','equity']].to_csv(index=False).encode('utf-8'),
                            "CFAOCI_backtest_equity.csv", "text/csv")
 
-    # ===== 8) EXPORTS PNG regroupés =====
-    st.subheader("Exports PNG")
-    figs_to_export = [("graphique_technique", tech_fig)]
-    if extra_fig is not None:
-        figs_to_export.append(("dividend_yield_pe", extra_fig))
-    if (ann_df is not None) and (not ann_df.empty):
-        figs_to_export.append(("fondamentaux_marche", fund_fig))
-    figs_to_export.append(("backtest_equity", eq_fig))
-    download_png_buttons(figs_to_export, light_theme, col_count=3)
 if __name__ == "__main__":
     main()
+
