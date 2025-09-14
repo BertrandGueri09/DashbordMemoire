@@ -26,7 +26,7 @@ st.set_page_config(
 DEFAULT_SHARES_OUTSTANDING = 181_371_900  # modifiable dans la sidebar
 
 # Fichiers par défaut
-DEFAULT_PRICE_PATH = "FAOCI_filtre.csv"
+DEFAULT_PRICE_PATH = "CFAOCI_filtre.csv"
 DEFAULT_DPS_PATH   = "dps_exemple.csv"
 DEFAULT_EPS_PATH   = "eps_exemple.csv"
 DEFAULT_NET_PATH   = "net_income_exemple.csv"
@@ -941,3 +941,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
