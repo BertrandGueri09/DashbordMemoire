@@ -606,6 +606,7 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
 # --------------------------- APP ---------------------------
 def main():
     st.title("Dashboard Marchés Boursiers - BRVM")
+
     
     # ===== SIDEBAR =====
     with st.sidebar:
@@ -814,5 +815,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
