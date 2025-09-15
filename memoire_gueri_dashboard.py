@@ -1,4 +1,4 @@
-# memoire_gueri_dashboard.py — Thème sombre uniquement + Exports PNG + Régimes + Titre centré
+# memoire_gueri_dashboard.py — Thème sombre uniquement + Filtre global par dates + Exports PNG + Régimes + Titre centré
 # ------------------------------------------------------------------------------------------------------------
 
 import streamlit as st
@@ -713,9 +713,9 @@ def main():
         freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0)
         freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
         dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
-        dr = st.date_input("Fenêtre d'analyse (graphique technique)", value=(dmin, dmax), min_value=dmin, max_value=dmax)
+        dr = st.date_input("Fenêtre d'analyse (appliquée partout)", value=(dmin, dmax), min_value=dmin, max_value=dmax)
+        # Fenêtre globale appliquée à TOUT : technique, backtest et fondamentaux
         start_date, end_date = (pd.to_datetime(dr[0]), pd.to_datetime(dr[1])) if isinstance(dr, tuple) else (pd.to_datetime(dmin), pd.to_datetime(dmax))
-        df_view = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
 
         st.header("Indicateurs techniques")
         indicators = st.multiselect("Sélection", ['MM', 'EMA', 'Bollinger', 'RSI', 'MACD'], default=['MM','RSI'])
@@ -778,12 +778,20 @@ def main():
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
         manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
-    # ===== TRAITEMENTS =====
-    df_view = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
-    df = add_indicators(resample_ohlcv(df_view, freq_code=freq_code), params)
-    metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
+    # ===== TRAITEMENTS : fenêtrage global =====
+    # 1) Filtre global pour toutes les analyses
+    df_window = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
+    if df_window.empty:
+        st.error("Aucune donnée dans l'intervalle sélectionné. Veuillez élargir la fenêtre de dates.")
+        st.stop()
 
-    ann_df = compute_market_fundamentals_from_original(df_original, shares)
+    # 2) Série resamplée pour le graphique technique et le backtest
+    df_resampled = resample_ohlcv(df_window, freq_code=freq_code)
+    df_with_indic = add_indicators(df_resampled, params)
+    metrics = performance_metrics(df_with_indic, rf_annual_pct=rf, freq_code=freq_code)
+
+    # 3) Fondamentaux calculés sur la FENÊTRE (et non plus sur tout l'historique)
+    ann_df = compute_market_fundamentals_from_original(df_window, shares)
 
     # DPS / EPS (upload > défauts)
     if dps_uploader is not None:
@@ -815,25 +823,25 @@ def main():
     m1,m2,m3,m4,m5,m6 = st.columns(6)
     m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
     m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
-    # >>>>> Format compact appliqué UNIQUEMENT ici <<<<<
+    # (compact UNIQUEMENT ici)
     m3.metric("Rend. annualisé", format_pct_compact(metrics['annualized_return']))
     m4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
     m5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
     m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
-    st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
+    st.caption(f"Période affichée : {df_with_indic['Date'].min().date()} → {df_with_indic['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
     # ===== 1) GRAPHIQUE TECHNIQUE =====
     st.subheader("Graphique technique")
-    tech_fig = plotly_combined_chart(df, chart_type, params)
+    tech_fig = plotly_combined_chart(df_with_indic, chart_type, params)
     st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===== 2) Dividend Yield & PER (AUTO) =====
+    # ===== 2) Dividend Yield & PER (AUTO sur la fenêtre) =====
     extra_fig = plot_dividend_and_pe(ann_df)
     if extra_fig is not None:
         st.subheader("Dividend Yield & PER")
         st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===== 3) Graphiques fondamentaux =====
+    # ===== 3) Graphiques fondamentaux (fenêtre) =====
     st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
     if (ann_df is not None) and (not ann_df.empty):
         fund_fig = plot_market_fundamentals_summary(ann_df)
@@ -847,7 +855,7 @@ def main():
         for line in describe_market_regimes(ann_df):
             st.write(f"- {line}")
 
-        # ===== 6) Téléchargement fondamentaux =====
+        # ===== 6) Téléchargement fondamentaux (fenêtre) =====
         fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
         st.download_button(
             f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
@@ -855,22 +863,22 @@ def main():
             file_name=fname, mime="text/csv"
         )
     else:
-        st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
+        st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes) pour la fenêtre sélectionnée.")
 
-    # ===== 7) BACKTEST =====
+    # ===== 7) BACKTEST (sur la fenêtre filtrée & resamplée) =====
     st.subheader(f"Backtesting — {strat}")
     if strat == "SMA Crossover":
-        bt_df, bt_stats, bt_trades = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
+        bt_df, bt_stats, bt_trades = backtest_sma(df_with_indic, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
     elif strat == "RSI + MACD":
         bt_df, bt_stats, bt_trades = backtest_rsi_macd(
-            df, rsi_window=int(rsi_window),
+            df_with_indic, rsi_window=int(rsi_window),
             rsi_buy=float(bt_rsi_buy), rsi_confirm=float(bt_rsi_confirm), rsi_sell=float(bt_rsi_sell),
             macd_fast=int(bt_macd_fast), macd_slow=int(bt_macd_slow), macd_signal=int(bt_macd_signal),
             fee_bps=float(bt_fee)
         )
     else:
         bt_df, bt_stats, bt_trades = backtest_mixed_sma_rsi(
-            df, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
+            df_with_indic, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
             rsi_window=int(rsi_window), rsi_enter=float(mix_rsi_enter), rsi_exit=float(mix_rsi_exit),
             fee_bps=float(mix_fee)
         )
@@ -879,7 +887,7 @@ def main():
     d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
     d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
     d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.1f}%")
-    # >>>>> Format compact appliqué UNIQUEMENT ici <<<<<
+    # (compact UNIQUEMENT ici)
     d4.metric("Perf. annualisée", format_pct_compact(bt_stats['perf_annualisee_%']))
     d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.1f}%")
     d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
