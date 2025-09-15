@@ -97,6 +97,36 @@ def set_fig_template(fig: go.Figure):
                       paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                       font=dict(color="#e8e6e3"))
 
+# ---------- Helpers d'affichage (formatage court & propre) ----------
+def _is_num(x):
+    try:
+        return np.isfinite(float(x))
+    except Exception:
+        return False
+
+def fmt_pct(x, decimals: int = 1, sci_threshold: float = 1e4) -> str:
+    """Formate un pourcentage proprement. Au-delà de sci_threshold en valeur absolue, passe en notation scientifique."""
+    if not _is_num(x):
+        return "—"
+    x = float(x)
+    if abs(x) >= sci_threshold:
+        return f"{x:.2e}%"
+    return f"{x:,.{decimals}f}%"
+
+def fmt_num(x, decimals: int = 0, sci_threshold: float = 1e9) -> str:
+    """Formate un nombre avec séparateur, sinon notation scientifique si très grand."""
+    if not _is_num(x):
+        return "—"
+    x = float(x)
+    if abs(x) >= sci_threshold:
+        return f"{x:.2e}"
+    return f"{x:,.{decimals}f}"
+
+def fmt_money_fcfa(x, decimals: int = 0, sci_threshold: float = 1e12) -> str:
+    """Formate FCFA (avec séparateur), passe en scientifique si énorme."""
+    s = fmt_num(x, decimals=decimals, sci_threshold=sci_threshold)
+    return f"{s} FCFA" if s != "—" else "—"
+
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
 def load_data(path_or_buffer: Union[str, io.BytesIO]) -> pd.DataFrame:
@@ -626,18 +656,19 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
     div_yield = ann_df['Dividend_Yield_%'].iloc[-1] if 'Dividend_Yield_%' in ann_df.columns else None
     div_total = ann_df['Dividends_Total_FCFA'].iloc[-1] if 'Dividends_Total_FCFA' in ann_df.columns else None
     per_last  = ann_df['PER'].iloc[-1] if 'PER' in ann_df.columns else None
+
     lines = []
     lines.append(f"**Synthèse fondamentale ({first_year}–{last_year})**")
-    lines.append(f"- **Prix fin {last_year}** : {last_price:,.2f} FCFA")
-    if last_cap is not None: lines.append(f"- **Capitalisation fin {last_year}** : {last_cap:,.0f} FCFA")
-    if last_ret is not None: lines.append(f"- **Rendement annuel {last_year}** : {last_ret:.2f} %")
-    if last_vol is not None: lines.append(f"- **Volatilité annualisée {last_year}** : {last_vol:.2f} %")
-    if last_mdd is not None: lines.append(f"- **Max Drawdown intra-année {last_year}** : {last_mdd:.2f} %")
-    if vol_mean is not None: lines.append(f"- **Volume annuel moyen (titres)** : {vol_mean:,.0f}")
-    if cagr is not None: lines.append(f"- **CAGR ({first_year}→{last_year})** : {100*cagr:.2f} % / an")
-    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield):.2f} %")
-    if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {float(div_total):,.0f} FCFA")
-    if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
+    lines.append(f"- **Prix fin {last_year}** : {fmt_money_fcfa(last_price, 2)}")
+    if last_cap is not None: lines.append(f"- **Capitalisation fin {last_year}** : {fmt_money_fcfa(last_cap, 0)}")
+    if last_ret is not None: lines.append(f"- **Rendement annuel {last_year}** : {fmt_pct(last_ret, 2)}")
+    if last_vol is not None: lines.append(f"- **Volatilité annualisée {last_year}** : {fmt_pct(last_vol, 2)}")
+    if last_mdd is not None: lines.append(f"- **Max Drawdown intra-année {last_year}** : {fmt_pct(last_mdd, 2)}")
+    if vol_mean is not None: lines.append(f"- **Volume annuel moyen (titres)** : {fmt_num(vol_mean, 0)}")
+    if cagr is not None: lines.append(f"- **CAGR ({first_year}→{last_year})** : {fmt_pct(100*cagr, 2)}")
+    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {fmt_pct(float(div_yield), 2)}")
+    if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {fmt_money_fcfa(float(div_total), 0)}")
+    if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {fmt_num(float(per_last), 2)}x")
     lines.append("> Capi = prix fin d’année × actions. EPS fourni/calculé ou estimé via DPS & payout ratio.")
     return "\n".join(lines)
 
@@ -805,12 +836,14 @@ def main():
     st.subheader("Métriques principales")
     badge = {"D":"Jour","W":"Semaine","M":"Mois"}[freq_code]
     m1,m2,m3,m4,m5,m6 = st.columns(6)
-    m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
-    m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
-    m3.metric("Rend. annualisé", f"{metrics['annualized_return']:.1f}%")
-    m4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
-    m5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
-    m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
+    # >>>>>>>>>>>>>>>> Affichage formaté (remplacement demandé) <<<<<<<<<<<<<<<<
+    m1.metric(f"Prix ({badge})", fmt_money_fcfa(metrics['current_price'], 0))
+    m2.metric("Rendement total", fmt_pct(metrics['total_return'], 1, sci_threshold=1e4))
+    m3.metric("Rend. annualisé", fmt_pct(metrics['annualized_return'], 1, sci_threshold=1e4))
+    m4.metric("Volatilité", fmt_pct(metrics['volatility'], 1, sci_threshold=1e4))
+    m5.metric("Max DD", fmt_pct(metrics['max_drawdown'], 1, sci_threshold=1e4))
+    m6.metric("Sharpe", fmt_num(metrics['sharpe'], 2, sci_threshold=1e6))
+    # --------------------------------------------------------------------------
     st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
     # ===== 1) GRAPHIQUE TECHNIQUE =====
@@ -867,12 +900,14 @@ def main():
         )
 
     d1,d2,d3,d4,d5,d6 = st.columns(6)
-    d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
-    d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
-    d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.1f}%")
-    d4.metric("Perf. annualisée", f"{bt_stats['perf_annualisee_%']:.1f}%")
-    d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.1f}%")
-    d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
+    # >>>>>>>>>>>>>>>> Affichage formaté (remplacement demandé) <<<<<<<<<<<<<<<<
+    d1.metric("Capital initial", fmt_money_fcfa(bt_stats['capital_initial'], 0))
+    d2.metric("Capital final", fmt_money_fcfa(bt_stats['capital_final'], 0))
+    d3.metric("Perf. totale", fmt_pct(bt_stats['perf_totale_%'], 1, sci_threshold=1e4))
+    d4.metric("Perf. annualisée", fmt_pct(bt_stats['perf_annualisee_%'], 1, sci_threshold=1e4))
+    d5.metric("Max DD", fmt_pct(bt_stats['max_drawdown_%'], 1, sci_threshold=1e4))
+    d6.metric("Sharpe", fmt_num(bt_stats['sharpe'], 2, sci_threshold=1e6))
+    # --------------------------------------------------------------------------
 
     eq_fig = go.Figure()
     eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
