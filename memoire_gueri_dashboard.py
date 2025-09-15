@@ -838,11 +838,11 @@ def main():
     m1,m2,m3,m4,m5,m6 = st.columns(6)
     # >>>>>>>>>>>>>>>> Affichage formaté (remplacement demandé) <<<<<<<<<<<<<<<<
     m1.metric(f"Prix ({badge})", fmt_money_fcfa(metrics['current_price'], 0))
-    m2.metric("Rendement total", fmt_pct(metrics['total_return'], 1, sci_threshold=1e4))
+    m2.metric("Rendement total", fmt_pct(metrics['total_return'], 1))
     m3.metric("Rend. annualisé", fmt_pct(metrics['annualized_return'], 1, sci_threshold=1e4))
-    m4.metric("Volatilité", fmt_pct(metrics['volatility'], 1, sci_threshold=1e4))
-    m5.metric("Max DD", fmt_pct(metrics['max_drawdown'], 1, sci_threshold=1e4))
-    m6.metric("Sharpe", fmt_num(metrics['sharpe'], 2, sci_threshold=1e6))
+    m4.metric("Volatilité", fmt_pct(metrics['volatility'], 1))
+    m5.metric("Max DD", fmt_pct(metrics['max_drawdown'], 1))
+    m6.metric("Sharpe", fmt_num(metrics['sharpe'], 2))
     # --------------------------------------------------------------------------
     st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
@@ -903,10 +903,10 @@ def main():
     # >>>>>>>>>>>>>>>> Affichage formaté (remplacement demandé) <<<<<<<<<<<<<<<<
     d1.metric("Capital initial", fmt_money_fcfa(bt_stats['capital_initial'], 0))
     d2.metric("Capital final", fmt_money_fcfa(bt_stats['capital_final'], 0))
-    d3.metric("Perf. totale", fmt_pct(bt_stats['perf_totale_%'], 1, sci_threshold=1e4))
+    d3.metric("Perf. totale", fmt_pct(bt_stats['perf_totale_%'], 1))
     d4.metric("Perf. annualisée", fmt_pct(bt_stats['perf_annualisee_%'], 1, sci_threshold=1e4))
-    d5.metric("Max DD", fmt_pct(bt_stats['max_drawdown_%'], 1, sci_threshold=1e4))
-    d6.metric("Sharpe", fmt_num(bt_stats['sharpe'], 2, sci_threshold=1e6))
+    d5.metric("Max DD", fmt_pct(bt_stats['max_drawdown_%'], 1))
+    d6.metric("Sharpe", fmt_num(bt_stats['sharpe'], 2))
     # --------------------------------------------------------------------------
 
     eq_fig = go.Figure()
@@ -917,3 +917,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
