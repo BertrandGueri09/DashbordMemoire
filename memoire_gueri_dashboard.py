@@ -13,9 +13,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from math import sqrt
 
-# Statsmodels pour prévisions
+# Statsmodels (prévisions)
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+# GARCH (optionnel)
+try:
+    from arch.univariate import ARX, GARCH as ARCH_GARCH, ConstantMean
+    ARCH_AVAILABLE = True
+except Exception:
+    ARCH_AVAILABLE = False
 
 warnings.filterwarnings('ignore')
 
@@ -38,17 +46,17 @@ DEFAULT_NET_PATH   = "net_income_exemple.csv"
 # ===== CSS sombre compact + Titre lisible (abaissé) =====
 BASE_CSS = """
 <style>
-/* Descendre un peu le contenu pour mieux respirer */
+/* Espaces globaux */
 .block-container {padding-top: 1.2rem; padding-bottom: 0.8rem; max-width: 1600px;}
 section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem;}
 div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
-.element-container:has(.stPlotlyChart) {margin-bottom: 0.4rem;}
-[data-testid="stMetric"] div {font-size: 0.9rem;}
-[data-testid="stMetricValue"] {font-size: 1.2rem !important;}
-[data-testid="stMetricDelta"] {font-size: 0.8rem !important;}
-p, li { line-height: 1.35; font-size: 0.95rem; }
+.element-container:has(.stPlotlyChart) {margin-bottom: 0.5rem;}
+[data-testid="stMetric"] div {font-size: 0.92rem;}
+[data-testid="stMetricValue"] {font-size: 1.22rem !important;}
+[data-testid="stMetricDelta"] {font-size: 0.82rem !important;}
+p, li { line-height: 1.38; font-size: 0.96rem; }
 h2, h3, h4 { margin-bottom: 0.25rem; }
-hr { margin: 0.5rem 0 0.6rem 0; }
+hr { margin: 0.6rem 0 0.7rem 0; }
 .small-note { font-size: 0.9rem; color: #c9c7c4; }
 
 /* Titre centré — lisibilité + position abaissée */
@@ -56,13 +64,12 @@ hr { margin: 0.5rem 0 0.6rem 0; }
   text-align: center;
   font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
   font-weight: 800;
-  font-size: clamp(22px, 2.2vw, 30px);   /* un peu plus petit */
+  font-size: clamp(22px, 2.1vw, 30px);
   line-height: 1.12;
-  letter-spacing: 0;
-  margin: 0.6rem 0 0.4rem 0;            /* ↑ marge top pour l'abaisser visuellement */
+  margin: 0.7rem 0 0.45rem 0;            /* ↓ le titre visuellement */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-variant-ligatures: none;         /* coupe les ligatures (évite les glyphes bizarres) */
+  font-variant-ligatures: none;         /* coupe les ligatures (évite glyphes bizarres) */
   font-feature-settings: "liga" 0, "clig" 0, "kern" 1;
   text-rendering: optimizeLegibility;
   word-break: keep-all;
@@ -71,14 +78,17 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 .app-subtitle {
   text-align: center;
   margin-top: -0.05rem;
-  margin-bottom: 1.0rem;                /* ↑ espace sous le sous-titre pour aérer */
-  opacity: 0.9;
-  font-size: clamp(12px, 1.1vw, 15px);
+  margin-bottom: 1.1rem;                /* aération sous-sous-titre */
+  opacity: 0.92;
+  font-size: clamp(12px, 1.08vw, 15px);
 }
 
 /* Sombre */
 body, .block-container { background-color: #0e1117; color: #e8e6e3; }
 .app-subtitle { color: #c9c7c4; }
+
+/* Cartes */
+[data-testid="stMetric"] { background: #141823; border-radius: 10px; padding: 10px; border: 1px solid #1e2330; }
 </style>
 """
 
@@ -92,9 +102,15 @@ def centered_title(main: str, sub: str = ""):
     st.markdown(html, unsafe_allow_html=True)
 
 def set_fig_template(fig: go.Figure):
-    fig.update_layout(template="plotly_dark",
-                      paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-                      font=dict(color="#e8e6e3"))
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="#0e1117",
+        plot_bgcolor="#0e1117",
+        font=dict(color="#e8e6e3", size=13),
+        hovermode="x unified",
+        xaxis=dict(showgrid=True, gridcolor="#202533", zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor="#202533", zeroline=False),
+    )
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -240,36 +256,37 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
                         row_heights=row_heights, subplot_titles=titles)
 
     if chart_type == 'Chandelles':
-        fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name='Cours'), row=1, col=1)
+        fig.add_trace(go.Candlestick(x=df['Date'], open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+                                     name='Cours', increasing_line_width=1.3, decreasing_line_width=1.3), row=1, col=1)
     else:
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name='Prix', mode='lines', line=dict(width=2)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['Close'], name='Prix', mode='lines', line=dict(width=2.4)), row=1, col=1)
 
     if params.get('show_sma'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_1'], name=f"MM{params['sma1']}", mode='lines'), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_2'], name=f"MM{params['sma2']}", mode='lines'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_1'], name=f"MM{params['sma1']}", mode='lines', line=dict(width=1.6)), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['SMA_2'], name=f"MM{params['sma2']}", mode='lines', line=dict(width=1.6)), row=1, col=1)
     if params.get('show_ema'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_1'], name=f"EMA{params['ema1']}", mode='lines'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['EMA_1'], name=f"EMA{params['ema1']}", mode='lines', line=dict(width=1.4, dash='dot')), row=1, col=1)
     if params.get('show_bb'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_M'], name="BB", mode='lines', line=dict(dash='dot')), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_M'], name="BB moyenne", mode='lines', line=dict(dash='dot', width=1.2)), row=1, col=1)
         fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_U'], showlegend=False, mode='lines', line=dict(width=0)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_L'], fill='tonexty', mode='lines', line=dict(width=0), name='BB Zone', opacity=0.1), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['BB_L'], fill='tonexty', mode='lines', line=dict(width=0), name='BB Zone', opacity=0.08), row=1, col=1)
 
     current_row = 2
     if params.get('show_rsi'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', mode='lines'), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['RSI'], name='RSI', mode='lines', line=dict(width=1.6)), row=current_row, col=1)
         for y, dash, color in [(70,"dash","red"), (50,"dot","gray"), (30,"dash","green")]:
             fig.add_shape(type="line", xref=f"x{current_row}", yref=f"y{current_row}",
                           x0=df['Date'].min(), x1=df['Date'].max(), y0=y, y1=y,
                           line=dict(dash=dash, width=1, color=color))
         current_row += 1
     if params.get('show_macd'):
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_L'], name='MACD', mode='lines'), row=current_row, col=1)
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_S'], name='Signal', mode='lines'), row=current_row, col=1)
-        fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.6), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_L'], name='MACD', mode='lines', line=dict(width=1.6)), row=current_row, col=1)
+        fig.add_trace(go.Scatter(x=df['Date'], y=df['MACD_S'], name='Signal', mode='lines', line=dict(width=1.2, dash='dot')), row=current_row, col=1)
+        fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.55), row=current_row, col=1)
 
-    fig.update_layout(height=620, hovermode='x unified', showlegend=True,
+    fig.update_layout(height=640, showlegend=True,
                       legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
-                      margin=dict(t=30, b=30, l=30, r=20))
+                      margin=dict(t=30, b=30, l=28, r=22))
     set_fig_template(fig)
     return fig
 
@@ -527,7 +544,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
             other = [c for c in dps_df.columns if c != 'Annee'][0]; dps_df = dps_df.rename(columns={other:'DPS'})
         else: dps_df = None
         if dps_df is not None:
-            out = out.merge(dps_df[['Annee','DPS']], on='Annee', how='left') # noqa
+            out = out.merge(dps_df[['Annee','DPS']], on='Annee', how='left')
     # EPS / Net income
     if eps_or_net_df is not None and not eps_or_net_df.empty:
         eps_col = None; net_col = None
@@ -599,10 +616,10 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
                         subplot_titles=['Dividend Yield (%)', 'PER (x)'],
                         shared_xaxes=False, vertical_spacing=0.06, horizontal_spacing=0.06)
     if has_yield:
-        fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)'), row=1, col=1)
+        fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)', line=dict(width=2)), row=1, col=1)
         fig.update_yaxes(title_text="%", row=1, col=1)
     if has_per:
-        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)'), row=1, col=2)
+        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)', line=dict(width=2)), row=1, col=2)
         fig.update_yaxes(title_text="x", row=1, col=2)
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
@@ -697,30 +714,8 @@ def train_valid_split(series: pd.Series, valid_ratio: float = 0.2) -> Tuple[pd.S
     n_valid = max(1, int(n * valid_ratio))
     return series.iloc[:-n_valid], series.iloc[-n_valid:]
 
-def model_naive(train: pd.Series, horizon: int) -> np.ndarray:
-    last = float(train.iloc[-1])
-    return np.full(horizon, last)
-
-def model_drift(train: pd.Series, horizon: int) -> np.ndarray:
-    y0, yN = float(train.iloc[0]), float(train.iloc[-1])
-    n = len(train) - 1
-    g = 0 if n <= 0 else (yN - y0) / n
-    return np.array([yN + g*(i+1) for i in range(horizon)])
-
-def model_sma(train: pd.Series, horizon: int, window: int = 10) -> np.ndarray:
-    m = float(train.tail(window).mean())
-    return np.full(horizon, m)
-
-def fit_holt_winters(train: pd.Series, horizon: int) -> np.ndarray:
-    try:
-        hw = ExponentialSmoothing(train, trend="add", seasonal=None, damped_trend=True, initialization_method="estimated")
-        model = hw.fit(optimized=True)
-        fc = model.forecast(horizon)
-        return np.asarray(fc.values, dtype=float)
-    except Exception:
-        return model_naive(train, horizon)
-
-def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int]]) -> Tuple[np.ndarray, Optional[Tuple[int,int,int]]]:
+# ----- ARIMA simple (grille courte) -----
+def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int]]) -> Tuple[np.ndarray, Optional[Tuple[int,int,int]], Optional[ARIMA]]:
     best_aic = np.inf; best_order = None; best_model = None
     for (p,d,q) in grid:
         try:
@@ -730,72 +725,168 @@ def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int
         except Exception:
             continue
     if best_model is None:
-        return model_naive(train, horizon), None
+        return np.full(horizon, float(train.iloc[-1])), None, None
     try:
         fc = best_model.forecast(steps=horizon)
-        return np.asarray(fc.values, dtype=float), best_order
+        return np.asarray(fc.values, dtype=float), best_order, best_model
     except Exception:
-        return model_naive(train, horizon), best_order
+        return np.full(horizon, float(train.iloc[-1])), best_order, best_model
 
+# ----- SARIMA rapide (saisonnalités usuelles) -----
+def fit_sarima_quick(series: pd.Series, horizon: int, season_len: int = 7) -> Tuple[np.ndarray, Optional[Tuple], Optional[SARIMAX]]:
+    # Grille très courte pour rester rapide
+    candidates = [((1,1,1),(0,1,1,season_len)), ((1,1,0),(0,1,1,season_len)), ((0,1,1),(1,1,0,season_len))]
+    best_aic = np.inf; best = None; best_model = None
+    # Validation courte
+    train, valid = train_valid_split(series, 0.2)
+    for order, sorder in candidates:
+        try:
+            m = SARIMAX(train, order=order, seasonal_order=sorder, enforce_stationarity=False, enforce_invertibility=False)
+            r = m.fit(disp=False)
+            aic = r.aic
+            if aic < best_aic:
+                best_aic = aic; best = (order, sorder); best_model = r
+        except Exception:
+            continue
+    if best_model is None:
+        return np.full(horizon, float(series.iloc[-1])), None, None
+    try:
+        fc = best_model.get_forecast(steps=min(horizon, len(valid))).predicted_mean
+        score = sMAPE(valid.iloc[:len(fc)].values, fc.values)
+    except Exception:
+        score = np.inf
+    # Refit sur toute la série
+    try:
+        full = SARIMAX(series, order=best[0], seasonal_order=best[1], enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
+        yhat = full.get_forecast(steps=horizon).predicted_mean.values
+        return np.asarray(yhat, dtype=float), best, full
+    except Exception:
+        return np.full(horizon, float(series.iloc[-1])), best, None
+
+# ----- GARCH(1,1) (si 'arch' dispo) -----
+def fit_garch_arx(series_close: pd.Series, horizon: int):
+    """Retourne (pred_close, lower, upper, model) si possible ; sinon None"""
+    if not ARCH_AVAILABLE or len(series_close) < 60:
+        return None
+    # Travailler sur rendements (log ou simples)
+    px = series_close.astype(float)
+    ret = px.pct_change().dropna()
+    if ret.empty:
+        return None
+    try:
+        # ARX(1) pour la moyenne, GARCH(1,1) pour la variance
+        # (rapide et robuste)
+        am = ARX(ret, lags=1, volatility=ARCH_GARCH(1,1), rescale=True)
+        res = am.fit(disp="off")
+        f = res.forecast(horizon=horizon, reindex=False)
+        mean_r = f.mean.values[-1]       # taille horizon
+        var_r  = f.variance.values[-1]
+        std_r  = np.sqrt(var_r)
+
+        # Chemin de prix attendu : cumuler (1 + r_t)
+        last_p = float(px.iloc[-1])
+        path_center = np.cumprod(1.0 + mean_r)
+        pred_close = last_p * path_center
+
+        # Bandes +/- 1.96*σ (volatilité conditionnelle) — accumulation multiplicative
+        path_hi = np.cumprod(1.0 + (mean_r + 1.96*std_r))
+        path_lo = np.cumprod(1.0 + (mean_r - 1.96*std_r))
+        upper = last_p * path_hi
+        lower = last_p * path_lo
+        return np.asarray(pred_close), np.asarray(lower), np.asarray(upper), res
+    except Exception:
+        return None
+
+# ----- Pré-sélection + bande d'incertitude -----
 def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2) -> Dict:
-    series = series.dropna()
-    if len(series) < 20:
-        y_hat = model_naive(series, horizon)
-        return {"name":"Naïf", "pred":y_hat, "order":None, "metric":"sMAPE", "score":np.nan}
+    series = series.dropna().astype(float)
+    if len(series) < 30:
+        y_hat = np.full(horizon, float(series.iloc[-1]))
+        return {"name":"Naïf", "pred":y_hat, "order":None, "bands":None, "score":np.nan, "engine":None}
+
+    # Split
     train, valid = train_valid_split(series, valid_ratio)
     h = min(horizon, len(valid))
     candidates = []
 
-    yhat = model_naive(train, h); sm = sMAPE(valid.iloc[:h].values, yhat)
-    candidates.append(("Naïf", yhat, None, sm))
-
-    yhat = model_drift(train, h); sm = sMAPE(valid.iloc[:h].values, yhat)
-    candidates.append(("Drift", yhat, None, sm))
-
-    for w in [5, 10, 20]:
-        yhat = model_sma(train, h, window=w); sm = sMAPE(valid.iloc[:h].values, yhat)
-        candidates.append((f"SMA({w})", yhat, None, sm))
-
-    yhat = fit_holt_winters(train, h); sm = sMAPE(valid.iloc[:h].values, yhat)
-    candidates.append(("Holt-Winters", yhat, None, sm))
-
+    # 1) ARIMA
     grid = [(0,1,0),(1,1,0),(0,1,1),(1,1,1)]
-    yhat, order = fit_arima_small(train, h, grid); sm = sMAPE(valid.iloc[:h].values, yhat)
-    candidates.append((f"ARIMA{order if order else ''}", yhat, order, sm))
+    y_arima, order, model = fit_arima_small(train, h, grid)
+    score_arima = sMAPE(valid.iloc[:h].values, y_arima)
+    candidates.append(("ARIMA" + (str(order) if order else ""), score_arima, ("arima", order)))
 
-    best = min(candidates, key=lambda t: t[3] if np.isfinite(t[3]) else np.inf)
-    best_name, _, best_order, best_score = best
+    # 2) SARIMA (saisonnalité 7 si daily)
+    y_sarima, sorder, _ = fit_sarima_quick(series, h, season_len=7)
+    score_sarima = sMAPE(valid.iloc[:h].values, y_sarima[:h])
+    candidates.append((f"SARIMA{str(sorder) if sorder else ''}", score_sarima, ("sarima", sorder)))
 
-    if best_name.startswith("Naïf"):
-        final_pred = model_naive(series, horizon)
-    elif best_name.startswith("Drift"):
-        final_pred = model_drift(series, horizon)
-    elif best_name.startswith("SMA"):
-        w = int(best_name.split("(")[1].split(")")[0])
-        final_pred = model_sma(series, horizon, window=w)
-    elif best_name.startswith("Holt"):
-        final_pred = fit_holt_winters(series, horizon)
-    else:
-        if best_order is None:
-            final_pred = model_naive(series, horizon)
+    # 3) GARCH (si dispo) — on évalue vs Close (reconstruit)
+    garch_ok = fit_garch_arx(series, h)
+    if garch_ok is not None:
+        y_garch, _, _, _ = garch_ok
+        score_garch = sMAPE(valid.iloc[:h].values, y_garch[:h])
+        candidates.append(("ARX+GARCH(1,1)", score_garch, ("garch", None)))
+
+    # Choix
+    best_name, best_score, best_tag = min(candidates, key=lambda t: t[1] if np.isfinite(t[1]) else np.inf)
+
+    # Refit final + bandes
+    bands = None
+    if best_tag[0] == "arima":
+        order = best_tag[1] if best_tag[1] else (1,1,1)
+        try:
+            m = ARIMA(series, order=order).fit(method_kwargs={"warn_convergence":False})
+            fc = m.get_forecast(steps=horizon)
+            pred = fc.predicted_mean.values
+            ci = fc.conf_int(alpha=0.2)  # 80% plus lisible
+            bands = (ci.iloc[:,0].values, ci.iloc[:,1].values)
+        except Exception:
+            pred = np.full(horizon, float(series.iloc[-1]))
+    elif best_tag[0] == "sarima":
+        order, sorder = (1,1,1), (0,1,1,7)
+        if best_tag[1] is not None:
+            order, sorder = best_tag[1]
+        try:
+            m = SARIMAX(series, order=order, seasonal_order=sorder, enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
+            fc = m.get_forecast(steps=horizon)
+            pred = fc.predicted_mean.values
+            ci = fc.conf_int(alpha=0.2)
+            bands = (ci.iloc[:,0].values, ci.iloc[:,1].values)
+        except Exception:
+            pred = np.full(horizon, float(series.iloc[-1]))
+    else:  # garch
+        ok = fit_garch_arx(series, horizon)
+        if ok is not None:
+            pred, lower, upper, _ = ok
+            bands = (lower, upper)
         else:
-            try:
-                m = ARIMA(series, order=best_order).fit(method_kwargs={"warn_convergence":False})
-                final_pred = np.asarray(m.forecast(steps=horizon).values, dtype=float)
-            except Exception:
-                final_pred = model_naive(series, horizon)
+            pred = np.full(horizon, float(series.iloc[-1]))
 
-    return {"name": best_name, "pred": final_pred, "order": best_order, "metric":"sMAPE", "score": float(best_score)}
+    return {"name": best_name, "pred": np.asarray(pred, dtype=float), "bands": bands, "score": float(best_score), "engine": best_tag[0]}
 
-def plot_forecast(history: pd.DataFrame, y_col: str, yhat: np.ndarray, horizon: int, title: str = "Prévision") -> go.Figure:
+def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon: int, bands=None, title: str = "Prévision") -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=history['Date'], y=history[y_col], mode='lines', name='Historique'))
+    # Historique
+    fig.add_trace(go.Scatter(x=history['Date'], y=history[y_col], mode='lines', name='Historique', line=dict(width=2.6)))
+    # Index futur
     last_date = pd.to_datetime(history['Date'].iloc[-1])
     inferred = pd.infer_freq(history['Date'])
     freq = inferred if inferred is not None else 'D'
     future_idx = pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
-    fig.add_trace(go.Scatter(x=future_idx, y=yhat, mode='lines+markers', name='Prévision'))
-    fig.update_layout(title=title, height=420, margin=dict(t=40,b=20,l=20,r=10))
+
+    # Bandes
+    if bands is not None:
+        lo, hi = bands
+        if len(lo) == horizon and len(hi) == horizon:
+            fig.add_trace(go.Scatter(x=future_idx, y=hi, line=dict(width=0), showlegend=False))
+            fig.add_trace(go.Scatter(x=future_idx, y=lo, fill='tonexty', name='Intervalle', opacity=0.18, line=dict(width=0)))
+
+    # Prévision
+    fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
+
+    fig.update_layout(title=title, height=460,
+                      margin=dict(t=52,b=20,l=24,r=12),
+                      legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
@@ -824,14 +915,10 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
         conf = "moyenne"
     else:
         conf = "faible"
-    if change_avg >= 3 and mom >= 0:
-        verdict = "Haussier"
-    elif change_avg <= -3 and mom <= 0:
-        verdict = "Baissier"
-    else:
-        verdict = "Neutre"
+    verdict = "Haussier" if (change_avg >= 3 and (np.isnan(mom) or mom >= 0)) else ("Baissier" if (change_avg <= -3 and (np.isnan(mom) or mom <= 0)) else "Neutre")
+    band_note = " (avec bandes d’incertitude)" if best.get("bands") is not None else ""
     lines = [
-        f"**Modèle retenu :** {name}  |  **Erreur (sMAPE validation)** ≈ {score:.2f} %  → **Confiance {conf}**",
+        f"**Modèle retenu :** {name}{band_note}  |  **Erreur (sMAPE validation)** ≈ {score:.2f} %  → **Confiance {conf}**",
         f"- **Direction attendue (sur {horizon} pas)** : {direction} (∆ moyen ≈ {change_avg:.2f} % vs. dernier prix)",
         f"- **Fourchette prévue** : {min_fc:,.2f} – {max_fc:,.2f} FCFA  |  **Prix moyen prévu** : {avg_fc:,.2f} FCFA",
         f"- **Pente attendue** : {slope:,.2f} FCFA/pas",
@@ -841,68 +928,44 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
     ]
     return "\n".join(lines)
 
-# --------------------------- GUIDE (nouvel onglet) ---------------------------
+# --------------------------- GUIDE (onglet) ---------------------------
 def guide_tab():
     st.markdown("## Guide & Méthodologie")
-    st.info("Les **filtres globaux** de la barre latérale (fréquence et fenêtre de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
+    st.info("Les **filtres globaux** (fréquence + plage de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
 
-    with st.expander("📈 Indicateurs techniques (sur le graphique principal)", expanded=True):
+    with st.expander("📈 Indicateurs techniques", expanded=True):
         st.markdown("""
-- **MM (SMA)** : moyenne arithmétique des *Close* sur *n* périodes.  
-  • **Signal courant** : croisement **MM rapide > MM lente** → biais haussier ; l’inverse → biais baissier.  
+- **MM (SMA)** : moyenne arithmétique des *Close*. Croisement **rapide>lente** = biais haussier.  
 - **EMA** : moyenne exponentielle (réagit plus vite).  
-- **Bandes de Bollinger** (20, ±2σ) : zone 95% autour de la moyenne mobile.  
-  • Clôture proche de la bande haute → **surachat relatif** ; proche bande basse → **survente relative**.  
-- **RSI (14)** : 0–100 (Wilder).  
-  • >70 : surachat ; <30 : survente ; **50** = équilibre/momentum neutre.  
-- **MACD (12/26/9)** : différence de deux EMA + ligne “signal” + histogramme.  
-  • **Croisement MACD↑Signal** : reprise haussière ; **MACD↓Signal** : essoufflement.
+- **Bandes de Bollinger** (20, ±2σ) : zone de prix “normale” autour de la MM.  
+- **RSI (14)** : >70 surachat ; <30 survente ; 50 neutre.  
+- **MACD (12/26/9)** : croisement MACD↑Signal = reprise haussière ; MACD↓Signal = essoufflement.
         """)
 
-    with st.expander("📊 Métriques de performance (cartes en haut)", expanded=False):
+    with st.expander("📊 Métriques de performance", expanded=False):
         st.markdown("""
-- **Rendement total** : variation % entre le premier et le dernier *Close* de la fenêtre.  
-- **Rendement annualisé** : conversion du rendement moyen par période en rythme annuel (selon la fréquence).  
-- **Volatilité annualisée** : σ des rendements × √(périodes/an).  
-- **Sharpe** (sans risque paramétrable) : (rendement excédentaire / volatilité) × √(périodes/an).  
-- **Max Drawdown** : pire baisse pic→creux cumulée (%).  
-- **CAGR** (dans la synthèse fondamentale) : taux composé annuel entre le 1er et le dernier prix.
+- **Rendement total** ; **Annualisé** (selon fréquence) ; **Volatilité** ; **Sharpe** (taux sans risque paramétrable) ; **Max Drawdown**.  
+- **CAGR** et **Synthèse** dans la section fondamentaux.
         """)
 
-    with st.expander("🧪 Backtests intégrés", expanded=False):
+    with st.expander("🧪 Backtests", expanded=False):
         st.markdown("""
-- **SMA Crossover** : achat quand **MM rapide > MM lente**, vente sur croisement inverse.  
-  • Avantage : simple, suit la tendance. • Limite : faux signaux en range.  
-- **RSI + MACD** : préparation par **RSI < seuil bas**, puis **achat** si **MACD croise à la hausse** ; **vente** si **RSI > seuil haut** ou **MACD croise à la baisse**.  
-  • Avantage : combine momentum (RSI) et changement de régime (MACD).  
-- **Mixte (SMA + RSI)** : on **n’achète** que si tendance haussière (MM rapide>lente) **et** RSI > seuil d’entrée ; sortie si l’un casse.  
-  • Paramètre **Frais (bps)** inclus dans les calculs d’équity.
+- **SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.
         """)
 
-    with st.expander("🤖 Modèles de prédiction automatiques", expanded=False):
-        st.markdown("""
-- **Naïf** : répète le dernier prix.  
-- **Drift** : prolonge la pente moyenne historique.  
-- **SMA (prévision)** : projette la moyenne récente.  
-- **Holt-Winters** : tendance lissée (additive, amortie).  
-- **ARIMA (petit grid)** : capture autocorrélations et différenciation.  
-- **Sélection** : meilleur **sMAPE** sur une validation (20% fin de série).  
-- **Résumé investisseur** : direction moyenne, fourchette prévue, pente, momentum récent, vol. annualisée et **verdict** (Haussier/Baissier/Neutre).
-        """)
-
-    with st.expander("ℹ️ Conseils d’interprétation rapide", expanded=False):
-        st.markdown("""
-- **Confluence** > un seul signal : MM (tendance) + RSI/MACD (momentum) + Bollinger (emplacement).  
-- **Risque** : surveiller **Max DD** et **volatilité** ; Sharpe > 1 est déjà correct.  
-- **Backtest ≠ garantie** : valider sur plusieurs fenêtres et fréquences.  
-- **Prévisions** : préférer une **fourchette** à un point ; regarder la **confiance (sMAPE)**.
+    with st.expander("🤖 Modèles de prédiction", expanded=False):
+        st.markdown(f"""
+- **ARIMA** & **SARIMA** (saisonnalité 7 jours par défaut pour les données quotidiennes).  
+- **ARX+GARCH(1,1)** (*si `arch` est installé*) : moyenne AR(1) + volatilité conditionnelle.  
+- **Sélection automatique** par **sMAPE** sur une mini-validation.  
+- **Graphique** : trajectoire prévue + **intervalle** (IC 80% pour ARIMA/SARIMA ou bandes de volatilité pour GARCH).
         """)
 
 # --------------------------- APP ---------------------------
 def main():
     apply_dark_theme()
     centered_title("Dashboard Marchés Boursiers – BRVM",
-                   "Analyse technique & fondamentale | Backtests | Prédiction auto (modèles rapides)")
+                   "Analyse technique & fondamentale | Backtests | Prédiction auto (ARIMA / SARIMA / GARCH)")
 
     # --- État global partagé (dates & fréquence) ---
     if 'global_date_start' not in st.session_state:
@@ -912,7 +975,6 @@ def main():
     if 'global_freq_code' not in st.session_state:
         st.session_state.global_freq_code = 'D'
 
-    # ---------------- TABS (ajout 'Guide & Méthodo') ----------------
     tab_main, tab_forecast, tab_guide = st.tabs(["Tableau de bord", "Prédiction", "Guide & Méthodo"])
 
     # ===================== TAB PRINCIPAL =====================
@@ -936,16 +998,15 @@ def main():
             st.header("Période & Fréquence (GLOBAL)")
             freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0,
                                 help="S'applique à tous les onglets.")
-            freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
-            st.session_state.global_freq_code = freq_code
+            st.session_state.global_freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
 
             dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
             default_range = (
-                st.session_state.global_date_start.date() if st.session_state.global_date_start else dmin,
-                st.session_state.global_date_end.date()   if st.session_state.global_date_end else dmax
+                st.session_state.global_date_start.date() if st.session_state.global_date_start is not None else dmin,
+                st.session_state.global_date_end.date()   if st.session_state.global_date_end   is not None else dmax
             )
             dr = st.date_input("Fenêtre d'analyse (globale)", value=default_range, min_value=dmin, max_value=dmax,
-                               help="Cette plage est utilisée dans tous les onglets (Tableau de bord & Prédiction).")
+                               help="Utilisée dans *Tableau de bord* et *Prédiction*.")
             if isinstance(dr, tuple):
                 st.session_state.global_date_start = pd.to_datetime(dr[0])
                 st.session_state.global_date_end   = pd.to_datetime(dr[1])
@@ -1077,15 +1138,12 @@ def main():
             fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
 
-            # ===== 4) Synthèse fondamentale =====
             st.markdown(summarize_fundamentals(ann_df))
 
-            # ===== 5) Régimes de marché =====
             st.markdown("**Régimes de marché (par périodes standards)**")
             for line in describe_market_regimes(ann_df):
                 st.write(f"- {line}")
 
-            # ===== 6) Téléchargement fondamentaux =====
             fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
             st.download_button(
                 f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
@@ -1095,7 +1153,7 @@ def main():
         else:
             st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
 
-        # ===== 7) BACKTEST =====
+        # ===== 4) BACKTEST =====
         st.subheader(f"Backtesting — {strat}")
         if len(df) < 10:
             st.warning("Période trop courte pour backtester.")
@@ -1125,7 +1183,7 @@ def main():
             d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
 
             eq_fig = go.Figure()
-            eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
+            eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity', line=dict(width=2.4)))
             eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
             set_fig_template(eq_fig)
             st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
@@ -1142,7 +1200,6 @@ def main():
 
         dmin_f, dmax_f = df_original['Date'].min().date(), df_original['Date'].max().date()
 
-        # Utiliser par défaut la fenêtre GLOBALE ; possibilité de la désactiver
         use_global_window = st.checkbox("Utiliser la même fenêtre que le Tableau de bord (global)", value=True)
         if use_global_window:
             start_f = st.session_state.global_date_start
@@ -1156,23 +1213,22 @@ def main():
         df_pred = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
         df_pred = df_pred.sort_values('Date').reset_index(drop=True)
 
-        if len(df_pred) < 20:
-            st.warning("Période trop courte pour comparer plusieurs modèles. Étendez la fenêtre.")
+        if len(df_pred) < 30:
+            st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
         else:
-            full_idx = pd.date_range(df_pred['Date'].min(), df_pred['Date'].max(), freq='D')
-            s = df_pred.set_index('Date')['Close'].reindex(full_idx).ffill()
-            s.name = 'Close'
+            # On garde la granularité d'origine (journalière) pour la saisonnalité 7
+            s = df_pred.set_index('Date')['Close'].astype(float)
 
-            with st.spinner("Sélection automatique du meilleur modèle…"):
+            with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA / GARCH)…"):
                 best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
 
             hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
-            fc_fig = plot_forecast(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
-                                   title=f"Prévision (meilleur modèle : {best['name']})")
+            fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
+                                     bands=best.get("bands"),
+                                     title=f"Prévision (meilleur modèle : {best['name']})")
             st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
             last_price = float(s.iloc[-1])
-            # momentum & volatilité récents (20 derniers jours)
             recent_returns = s.pct_change().dropna().tail(20)
             st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
 
@@ -1182,6 +1238,9 @@ def main():
             st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
                                file_name="previsions_auto.csv", mime="text/csv")
 
+            if not ARCH_AVAILABLE:
+                st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
+
     # ===================== TAB GUIDE =====================
     with tab_guide:
         guide_tab()
@@ -1189,4 +1248,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
