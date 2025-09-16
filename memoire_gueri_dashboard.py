@@ -527,7 +527,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
             other = [c for c in dps_df.columns if c != 'Annee'][0]; dps_df = dps_df.rename(columns={other:'DPS'})
         else: dps_df = None
         if dps_df is not None:
-            out = out.merge(dps_df[['Annee','DPS']], on('Annee'), how='left')  # noqa
+            out = out.merge(dps_df[['Annee','DPS']], on='Annee', how='left') # noqa
     # EPS / Net income
     if eps_or_net_df is not None and not eps_or_net_df.empty:
         eps_col = None; net_col = None
@@ -1189,3 +1189,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
