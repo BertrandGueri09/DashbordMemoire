@@ -20,7 +20,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 # GARCH (optionnel)
 try:
-    from arch.univariate import ARX, GARCH as ARCH_GARCH
+    from arch.univariate import ARX, GARCH as ARCH_GARCH, ConstantMean
     ARCH_AVAILABLE = True
 except Exception:
     ARCH_AVAILABLE = False
@@ -197,8 +197,8 @@ def macd(prices, fast=12, slow=26, signal=9):
     hist = line - sig
     return line, sig, hist
 
-def _annualization_factor(code: str) -> float:
-    return {'D': 252.0, 'W': 52.0, 'M': 12.0}.get(code, 252.0)
+def _annualization_factor(freq_code: str) -> float:
+    return {'D': 252.0, 'W': 52.0, 'M': 12.0}.get(freq_code, 252.0)
 
 def performance_metrics(df, rf_annual_pct=0.0, freq_code='D'):
     latest, oldest = df.iloc[-1], df.iloc[0]
@@ -421,7 +421,7 @@ def backtest_mixed_sma_rsi(df, sma_fast=20, sma_slow=50, rsi_window=14, rsi_ente
     trades_df = pd.DataFrame(trades, columns=['Date','Action','Prix','Quantite'])
     return data, stats, trades_df
 
-# --------------------------- FONDAMENTAUX, PARSING ANNUELS ---------------------------
+# --------------------------- FONDAMENTAUX AUTO ---------------------------
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
     if df is None or df.empty:
         return None
@@ -432,8 +432,9 @@ def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
         df['Annee'] = df.index.astype(int)
         return 'Annee'
     for c in df.columns:
+        s = df[c]
         try:
-            vals = pd.to_numeric(df[c], errors='coerce')
+            vals = pd.to_numeric(s, errors='coerce')
             if vals.notna().mean() > 0.9 and (vals.between(1900, 2100)).mean() > 0.8:
                 df.rename(columns={c: 'Annee'}, inplace=True)
                 return 'Annee'
@@ -442,9 +443,11 @@ def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
     return None
 
 def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
-    if df is None or df.empty: return None
+    if df is None or df.empty:
+        return None
     col = _detect_year_column(df)
-    if not col: return None
+    if not col:
+        return None
     try:
         y = pd.to_numeric(df[col], errors='coerce')
         return int(np.nanmin(y.values)), int(np.nanmax(y.values))
@@ -482,15 +485,21 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
     ann = ann.reset_index(drop=True)
     ann.insert(0, 'Annee', years)
 
-    for c in ['last_price','avg_price','annual_return_%','vol_annual_%','max_drawdown_intra_%']:
-        ann[c] = ann[c].round(2)
+    ann['last_price'] = ann['last_price'].round(2)
+    ann['avg_price'] = ann['avg_price'].round(2)
     ann['vol_sum'] = ann['vol_sum'].round(0).astype('Int64')
+    ann['annual_return_%'] = ann['annual_return_%'].round(2)
+    ann['vol_annual_%'] = ann['vol_annual_%'].round(2)
     ann['market_cap_fin_annee_FCFA'] = ann['market_cap_fin_annee_FCFA'].round(0).astype('Int64')
+    ann['max_drawdown_intra_%'] = ann['max_drawdown_intra_%'].round(2)
     return ann
 
-def _parse_year_value_df(uploaded_or_path, candidates: List[str]) -> Optional[pd.DataFrame]:
+def _parse_year_value_df(uploaded_or_path, value_cols_candidates: List[str]) -> Optional[pd.DataFrame]:
     try:
-        df = pd.read_csv(uploaded_or_path)
+        if isinstance(uploaded_or_path, (str, os.PathLike)):
+            df = pd.read_csv(uploaded_or_path)
+        else:
+            df = pd.read_csv(uploaded_or_path)
     except Exception:
         return None
     df.columns = df.columns.str.strip()
@@ -502,12 +511,12 @@ def _parse_year_value_df(uploaded_or_path, candidates: List[str]) -> Optional[pd
         else:
             return None
     candidate = None
-    for c in candidates:
+    for c in value_cols_candidates:
         if c in df.columns:
             candidate = c; break
     if candidate is None:
         lower = {c.lower(): c for c in df.columns}
-        for c in candidates:
+        for c in value_cols_candidates:
             if c.lower() in lower:
                 candidate = lower[c.lower()]; break
     if candidate is None:
@@ -526,6 +535,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
     if ann_df is None or ann_df.empty:
         return ann_df
     out = ann_df.copy()
+    # DPS
     if dps_df is not None and not dps_df.empty:
         val_col = [c for c in dps_df.columns if c.lower() in ['dps','dividend_per_share','dividende','dividendes','dividende_par_action']]
         if val_col: dps_df = dps_df.rename(columns={val_col[0]: 'DPS'})
@@ -534,6 +544,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
         else: dps_df = None
         if dps_df is not None:
             out = out.merge(dps_df[['Annee','DPS']], on='Annee', how='left')
+    # EPS / Net income
     if eps_or_net_df is not None and not eps_or_net_df.empty:
         eps_col = None; net_col = None
         for c in eps_or_net_df.columns:
@@ -552,6 +563,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
 
     if 'EPS' not in out.columns: out['EPS'] = np.nan
 
+    # Estimation via DPS + payout (dernière année)
     if manual_dps is not None and manual_payout_pct is not None and len(out) > 0:
         try:
             last_year = int(out['Annee'].max())
@@ -569,16 +581,31 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
         out['PER'] = (out['last_price'] / out['EPS'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).round(2)
     return out
 
-# --------- Graphique Dividend Yield & PER (corrigé) ----------
+def plot_market_fundamentals_summary(ann_df: pd.DataFrame) -> go.Figure:
+    year_col = _detect_year_column(ann_df) or 'Annee'
+    x = ann_df[year_col]
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)',
+                        'Volatilité annualisée (%)', 'Volume annuel (titres)'],
+        vertical_spacing=0.16, horizontal_spacing=0.08
+    )
+    fig.add_trace(go.Bar(x=x, y=ann_df['market_cap_fin_annee_FCFA'], name='Capi fin année'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=x, y=ann_df['annual_return_%'], name='Rendement annuel', mode='lines+markers'), row=1, col=2)
+    fig.add_trace(go.Scatter(x=x, y=ann_df['vol_annual_%'], name='Vol annualisée', mode='lines+markers'), row=2, col=1)
+    fig.add_trace(go.Bar(x=x, y=ann_df['vol_sum'], name='Volume annuel'), row=2, col=2)
+    fig.update_yaxes(title_text="FCFA", row=1, col=1)
+    fig.update_yaxes(title_text="%",    row=1, col=2)
+    fig.update_yaxes(title_text="%",    row=2, col=1)
+    fig.update_yaxes(title_text="Titres", row=2, col=2)
+    fig.update_layout(height=480, showlegend=False, margin=dict(t=28, b=22, l=24, r=10))
+    set_fig_template(fig)
+    return fig
+
 def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
     if ann_df is None or ann_df.empty:
         return None
-    year_col = None
-    for c in ['Annee', 'Année', 'Year', 'year']:
-        if c in ann_df.columns:
-            year_col = c; break
-    if year_col is None:
-        return None
+    year_col = _detect_year_column(ann_df) or 'Annee'
     x = ann_df[year_col]
     has_yield = 'Dividend_Yield_%' in ann_df.columns and ann_df['Dividend_Yield_%'].notna().any()
     has_per   = 'PER' in ann_df.columns and ann_df['PER'].notna().any()
@@ -586,7 +613,7 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
         return None
     fig = make_subplots(rows=1, cols=2,
                         subplot_titles=['Dividend Yield (%)', 'PER (x)'],
-                        shared_xaxes=False, vertical_spacing=0.06, horizontal_spacing=0.08)
+                        shared_xaxes=False, vertical_spacing=0.06, horizontal_spacing=0.06)
     if has_yield:
         fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)', line=dict(width=2)), row=1, col=1)
         fig.update_yaxes(title_text="%", row=1, col=1)
@@ -595,18 +622,91 @@ def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
         fig.update_yaxes(title_text="x", row=1, col=2)
     fig.update_xaxes(title_text="Année", row=1, col=1)
     fig.update_xaxes(title_text="Année", row=1, col=2)
-    fig.update_layout(height=380, showlegend=False, margin=dict(t=30, b=18, l=24, r=10),
-                      template='plotly_dark', paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
-                      font=dict(color="#e8e6e3", size=13))
+    fig.update_layout(height=380, showlegend=False, margin=dict(t=26, b=18, l=24, r=10))
+    set_fig_template(fig)
     return fig
 
-# --------------------------- Formats & modèles ---------------------------
+def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
+    if ann_df is None or ann_df.empty:
+        return "Aucun indicateur fondamental calculable sur la période importée."
+    yc = _detect_year_column(ann_df) or 'Annee'
+    ann_df = ann_df.sort_values(yc).reset_index(drop=True)
+    last = ann_df.iloc[-1]
+    last_year = int(last[yc]); last_price = float(last['last_price'])
+    last_cap = int(last['market_cap_fin_annee_FCFA']) if pd.notna(last['market_cap_fin_annee_FCFA']) else None
+    last_ret = float(last['annual_return_%']) if pd.notna(last['annual_return_%']) else None
+    last_vol = float(last['vol_annual_%']) if pd.notna(last['vol_annual_%']) else None
+    last_mdd = float(last['max_drawdown_intra_%']) if pd.notna(last['max_drawdown_intra_%']) else None
+    vol_mean = ann_df['vol_sum'].dropna(); vol_mean = float(vol_mean.mean()) if not vol_mean.empty else None
+    first = ann_df.iloc[0]; first_year = int(first[yc]); first_price = float(first['last_price'])
+    n_years = max(1, last_year - first_year)
+    cagr = None
+    if first_price > 0: cagr = (last_price / first_price) ** (1 / n_years) - 1
+    div_yield = ann_df['Dividend_Yield_%'].iloc[-1] if 'Dividend_Yield_%' in ann_df.columns else None
+    div_total = ann_df['Dividends_Total_FCFA'].iloc[-1] if 'Dividends_Total_FCFA' in ann_df.columns else None
+    per_last  = ann_df['PER'].iloc[-1] if 'PER' in ann_df.columns else None
+    lines = []
+    lines.append(f"**Synthèse fondamentale ({first_year}–{last_year})**")
+    lines.append(f"- **Prix fin {last_year}** : {last_price:,.2f} FCFA")
+    if last_cap is not None: lines.append(f"- **Capitalisation fin {last_year}** : {last_cap:,.0f} FCFA")
+    if last_ret is not None: lines.append(f"- **Rendement annuel {last_year}** : {last_ret:.2f} %")
+    if last_vol is not None: lines.append(f"- **Volatilité annualisée {last_year}** : {last_vol:.2f} %")
+    if last_mdd is not None: lines.append(f"- **Max Drawdown intra-année {last_year}** : {last_mdd:.2f} %")
+    if vol_mean is not None: lines.append(f"- **Volume annuel moyen (titres)** : {vol_mean:,.0f}")
+    if cagr is not None: lines.append(f"- **CAGR ({first_year}→{last_year})** : {100*cagr:.2f} % / an")
+    if pd.notna(div_yield): lines.append(f"- **Rendement du dividende {last_year}** : {float(div_yield):.2f} %")
+    if pd.notna(div_total): lines.append(f"- **Dividendes totaux {last_year}** : {float(div_total):,.0f} FCFA")
+    if pd.notna(per_last):  lines.append(f"- **PER {last_year}** : {float(per_last):.2f}x")
+    lines.append("> Capi = prix fin d’année × actions. EPS fourni/calculé ou estimé via DPS & payout ratio.")
+    return "\n".join(lines)
+
+def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
+    if ann_df is None or ann_df.empty: return ["Aucune donnée annuelle disponible pour décrire les régimes de marché."]
+    yc = _detect_year_column(ann_df) or 'Annee'
+    df = ann_df[[yc, 'annual_return_%']].dropna().copy()
+    if df.empty: return ["Rendements annuels indisponibles."]
+    start, end = int(df[yc].min()), int(df[yc].max())
+    windows = [(2006, 2010), (2011, 2015), (2016, 2020), (2021, 2025)]
+    out = []
+    for a, b in windows:
+        s, e = max(start, a), min(end, b)
+        if s > e:
+            continue
+        block = df[(df[yc] >= s) & (df[yc] <= e)]
+        if block.empty:
+            continue
+        mean_ret = block['annual_return_%'].mean()
+        best_row = block.loc[block['annual_return_%'].idxmax()]
+        worst_row = block.loc[block['annual_return_%'].idxmin()]
+        if mean_ret > 8:
+            label = "marché haussier"
+        elif mean_ret < -5:
+            label = "marché baissier"
+        else:
+            label = "phase de consolidation"
+        out.append(
+            f"**{s}–{e}** : {label} (rendement moyen ≈ {mean_ret:.1f}%). "
+            f"Meilleure année : {int(best_row[yc])} ({best_row['annual_return_%']:.1f}%). "
+            f"Pire année : {int(worst_row[yc])} ({worst_row['annual_return_%']:.1f}%)."
+        )
+    if not out:
+        out = [f"Période couverte {start}–{end} sans bloc standard complet ; tendance moyenne ≈ {df['annual_return_%'].mean():.1f}%."]
+    return out
+
+# --------------------------- OUTILS PRÉSENTATION NOMBRES ---------------------------
+def format_pct_compact(x: float) -> str:
+    try:
+        return f"{float(x):.2f}%"
+    except Exception:
+        return str(x)
+
 def format_pct_scientific(x: float) -> str:
     try:
         return f"{float(x):.2e}%"
     except Exception:
         return str(x)
 
+# --------------------------- MODÈLES DE PRÉVISION (AUTO) ---------------------------
 def sMAPE(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
@@ -615,10 +715,12 @@ def sMAPE(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return 100.0 * np.mean(2.0 * np.abs(y_pred - y_true) / denom)
 
 def train_valid_split(series: pd.Series, valid_ratio: float = 0.2) -> Tuple[pd.Series, pd.Series]:
-    n = len(series); n_valid = max(1, int(n * valid_ratio))
+    n = len(series)
+    n_valid = max(1, int(n * valid_ratio))
     return series.iloc[:-n_valid], series.iloc[-n_valid:]
 
-def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int]]):
+# ----- ARIMA simple (grille courte) -----
+def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int]]) -> Tuple[np.ndarray, Optional[Tuple[int,int,int]], Optional[ARIMA]]:
     best_aic = np.inf; best_order = None; best_model = None
     for (p,d,q) in grid:
         try:
@@ -635,7 +737,8 @@ def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int
     except Exception:
         return np.full(horizon, float(train.iloc[-1])), best_order, best_model
 
-def fit_sarima_quick(series: pd.Series, horizon: int, season_len: int = 5):
+# ----- SARIMA rapide (saisonnalité = 5 jours ouvrés) -----
+def fit_sarima_quick(series: pd.Series, horizon: int, season_len: int = 5) -> Tuple[np.ndarray, Optional[Tuple], Optional[SARIMAX]]:
     candidates = [((1,1,1),(0,1,1,season_len)), ((1,1,0),(0,1,1,season_len)), ((0,1,1),(1,1,0,season_len))]
     best_aic = np.inf; best = None; best_model = None
     train, valid = train_valid_split(series, 0.2)
@@ -643,14 +746,16 @@ def fit_sarima_quick(series: pd.Series, horizon: int, season_len: int = 5):
         try:
             m = SARIMAX(train, order=order, seasonal_order=sorder, enforce_stationarity=False, enforce_invertibility=False)
             r = m.fit(disp=False)
-            if r.aic < best_aic:
-                best_aic = r.aic; best = (order, sorder); best_model = r
+            aic = r.aic
+            if aic < best_aic:
+                best_aic = aic; best = (order, sorder); best_model = r
         except Exception:
             continue
     if best_model is None:
         return np.full(horizon, float(series.iloc[-1])), None, None
     try:
-        _ = sMAPE(valid.values, best_model.get_forecast(steps=min(horizon, len(valid))).predicted_mean.values)
+        fc = best_model.get_forecast(steps=min(horizon, len(valid))).predicted_mean
+        _ = sMAPE(valid.iloc[:len(fc)].values, fc.values)  # score non utilisé ici
     except Exception:
         pass
     try:
@@ -660,6 +765,7 @@ def fit_sarima_quick(series: pd.Series, horizon: int, season_len: int = 5):
     except Exception:
         return np.full(horizon, float(series.iloc[-1])), best, None
 
+# ----- GARCH(1,1) (si 'arch' dispo) -----
 def fit_garch_arx(series_close: pd.Series, horizon: int):
     if not ARCH_AVAILABLE or len(series_close) < 60:
         return None
@@ -674,21 +780,25 @@ def fit_garch_arx(series_close: pd.Series, horizon: int):
         mean_r = f.mean.values[-1]
         var_r  = f.variance.values[-1]
         std_r  = np.sqrt(var_r)
+
         last_p = float(px.iloc[-1])
         path_center = np.cumprod(1.0 + mean_r)
         pred_close = last_p * path_center
+
         path_hi = np.cumprod(1.0 + (mean_r + 1.96*std_r))
         path_lo = np.cumprod(1.0 + (mean_r - 1.96*std_r))
-        upper = last_p * path_hi; lower = last_p * path_lo
+        upper = last_p * path_hi
+        lower = last_p * path_lo
         return np.asarray(pred_close), np.asarray(lower), np.asarray(upper), res
     except Exception:
         return None
 
+# ----- Sélection & bandes -----
 def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2) -> Dict:
     series = series.dropna().astype(float)
     if len(series) < 30:
         y_hat = np.full(horizon, float(series.iloc[-1]))
-        return {"name":"Naïf", "pred":y_hat, "bands":None, "score":np.nan, "engine":"naive"}
+        return {"name":"Naïf", "pred":y_hat, "order":None, "bands":None, "score":np.nan, "engine":None}
 
     train, valid = train_valid_split(series, valid_ratio)
     h = min(horizon, len(valid))
@@ -699,7 +809,7 @@ def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2)
     score_arima = sMAPE(valid.iloc[:h].values, y_arima)
     candidates.append(("ARIMA" + (str(order) if order else ""), score_arima, ("arima", order)))
 
-    y_sarima, sorder, _ = fit_sarima_quick(series, h, season_len=5)
+    y_sarima, sorder, _ = fit_sarima_quick(series, h, season_len=5)  # <- 5 jours ouvrés
     score_sarima = sMAPE(valid.iloc[:h].values, y_sarima[:h])
     candidates.append((f"SARIMA{str(sorder) if sorder else ''}", score_sarima, ("sarima", sorder)))
 
@@ -734,7 +844,7 @@ def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2)
             bands = (ci.iloc[:,0].values, ci.iloc[:,1].values)
         except Exception:
             pred = np.full(horizon, float(series.iloc[-1]))
-    else:
+    else:  # garch
         ok = fit_garch_arx(series, horizon)
         if ok is not None:
             pred, lower, upper, _ = ok
@@ -744,61 +854,67 @@ def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2)
 
     return {"name": best_name, "pred": np.asarray(pred, dtype=float), "bands": bands, "score": float(best_score), "engine": best_tag[0]}
 
-# ---- Figure prévision : superpose horizon courant + projection 5 ans ----
-def forecast_figure_dual(history: pd.DataFrame,
-                         pred_main: np.ndarray, horizon_main: int, bands_main=None,
-                         pred_5y: Optional[np.ndarray]=None, horizon_5y: Optional[int]=None,
-                         title: str = "Prévision (horizon & projection 5 ans)") -> go.Figure:
+def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon: int, bands=None, title: str = "Prévision") -> go.Figure:
     fig = go.Figure()
-    # Historique
-    fig.add_trace(go.Scatter(x=history['Date'], y=history['Close'], mode='lines',
-                             name='Historique', line=dict(width=2.6)))
-
+    fig.add_trace(go.Scatter(x=history['Date'], y=history[y_col], mode='lines', name='Historique', line=dict(width=2.6)))
     last_date = pd.to_datetime(history['Date'].iloc[-1])
     inferred = pd.infer_freq(history['Date'])
     freq = inferred if inferred is not None else 'D'
+    future_idx = pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
 
-    # Index futurs
-    future_idx_main = pd.date_range(last_date, periods=horizon_main+1, freq=freq)[1:]
+    if bands is not None:
+        lo, hi = bands
+        if len(lo) == horizon and len(hi) == horizon:
+            fig.add_trace(go.Scatter(x=future_idx, y=hi, line=dict(width=0), showlegend=False))
+            fig.add_trace(go.Scatter(x=future_idx, y=lo, fill='tonexty', name='Intervalle', opacity=0.18, line=dict(width=0)))
 
-    # Bandes (horizon courant)
-    if bands_main is not None:
-        lo, hi = bands_main
-        if len(lo) == horizon_main and len(hi) == horizon_main:
-            fig.add_trace(go.Scatter(x=future_idx_main, y=hi, line=dict(width=0), showlegend=False))
-            fig.add_trace(go.Scatter(x=future_idx_main, y=lo, fill='tonexty', name='Intervalle (horizon)',
-                                     opacity=0.18, line=dict(width=0)))
+    fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
 
-    # Courbe horizon courant
-    fig.add_trace(go.Scatter(x=future_idx_main, y=pred_main, mode='lines+markers',
-                             name='Prévision (horizon courant)', line=dict(width=2.8)))
-
-    # Projection 5 ans (seulement la courbe pour lisibilité)
-    if (pred_5y is not None) and (horizon_5y is not None):
-        future_idx_5y = pd.date_range(last_date, periods=horizon_5y+1, freq=freq)[1:]
-        fig.add_trace(go.Scatter(x=future_idx_5y, y=pred_5y, mode='lines',
-                                 name='Projection 5 ans', line=dict(width=2.4, dash='dash')))
-
-        # zone forecast jusqu'à la fin des 5 ans
-        x1 = future_idx_5y[-1]
-    else:
-        x1 = future_idx_main[-1]
-
-    # zone future + trait de coupure
-    fig.add_vrect(x0=last_date, x1=x1, fillcolor="#5b8def", opacity=0.08, line_width=0)
-    fig.add_shape(type="line", x0=last_date, x1=last_date, y0=0, y1=1, xref="x", yref="paper",
-                  line=dict(color="#5b8def", width=1, dash="dot"))
-
-    # Ticks annuels
-    fig.update_xaxes(dtick="M12", tickformat="%Y")
-
-    fig.update_layout(title=title, height=480,
-                      margin=dict(t=52,b=86,l=24,r=12),
-                      legend=dict(orientation='h', yanchor='top', y=-0.22, xanchor='left', x=0))
+    fig.update_layout(title=title, height=460,
+                      margin=dict(t=52,b=80,l=24,r=12),
+                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
-# --------------------------- GUIDE ---------------------------
+def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, recent_returns: pd.Series) -> str:
+    name = best.get("name","?")
+    score = best.get("score", np.nan)
+    pred = np.asarray(best.get("pred", []), dtype=float)
+    if pred.size == 0:
+        return f"**Modèle retenu :** {name}. Aucune prévision exploitable."
+    avg_fc = float(np.mean(pred))
+    min_fc, max_fc = float(np.min(pred)), float(np.max(pred))
+    change_avg = 100.0 * (avg_fc/last_price - 1.0) if last_price else np.nan
+    x = np.arange(1, len(pred)+1)
+    try:
+        slope = float(np.polyfit(x, pred, 1)[0])
+    except Exception:
+        slope = 0.0
+    direction = "hausse" if change_avg > 1 else ("baisse" if change_avg < -1 else "stabilité")
+    mom = recent_returns.mean() * 100 if len(recent_returns) else np.nan
+    vol = recent_returns.std() * sqrt(252) * 100 if len(recent_returns) else np.nan
+    if np.isnan(score):
+        conf = "faible"
+    elif score <= 8:
+        conf = "élevée"
+    elif score <= 15:
+        conf = "moyenne"
+    else:
+        conf = "faible"
+    verdict = "Haussier" if (change_avg >= 3 and (np.isnan(mom) or mom >= 0)) else ("Baissier" if (change_avg <= -3 and (np.isnan(mom) or mom <= 0)) else "Neutre")
+    band_note = " (avec bandes d’incertitude)" if best.get("bands") is not None else ""
+    lines = [
+        f"**Modèle retenu :** {name}{band_note}  |  **Erreur (sMAPE validation)** ≈ {score:.2f} %  → **Confiance {conf}**",
+        f"- **Direction attendue (sur {horizon} pas)** : {direction} (∆ moyen ≈ {change_avg:.2f} % vs. dernier prix)",
+        f"- **Fourchette prévue** : {min_fc:,.2f} – {max_fc:,.2f} FCFA  |  **Prix moyen prévu** : {avg_fc:,.2f} FCFA",
+        f"- **Pente attendue** : {slope:,.2f} FCFA/pas",
+        f"- **Momentum récent (20 derniers jours)** : {mom:.2f} %  |  **Vol annualisée récente** : {vol:.2f} %",
+        f"**Verdict** : {verdict}.",
+        "_Rappel : ce résumé est indicatif et ne constitue pas un conseil en investissement._"
+    ]
+    return "\n".join(lines)
+
+# --------------------------- GUIDE (onglet) ---------------------------
 def guide_tab():
     st.markdown("## Guide & Méthodologie")
     st.info("Les **filtres globaux** (fréquence + plage de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
@@ -810,36 +926,42 @@ def guide_tab():
 - **RSI (14)** : >70 surachat ; <30 survente ; 50 neutre.  
 - **MACD (12/26/9)** : croisement MACD↑Signal = reprise haussière ; MACD↓Signal = essoufflement.
         """)
-    with st.expander("📊 Métriques & backtests", expanded=False):
+    with st.expander("📊 Métriques de performance", expanded=False):
         st.markdown("""
-- **Rendement total / annualisé**, **Volatilité**, **Sharpe**, **Max Drawdown** (scientifique pour les annualisés).  
-- Backtests : **SMA Crossover**, **RSI+MACD**, **Mixte** (frais en bps).
+- **Rendement total** ; **Annualisé** (selon fréquence) ; **Volatilité** ; **Sharpe** (taux sans risque paramétrable) ; **Max Drawdown**.  
+- **CAGR** et **Synthèse** dans la section fondamentaux.
         """)
+    with st.expander("🧪 Backtests", expanded=False):
+        st.markdown("**SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.")
     with st.expander("🤖 Modèles de prédiction", expanded=False):
         st.markdown("""
-- **ARIMA**, **SARIMA (saisonnalité 5 jours ouvrés)**, **ARX+GARCH(1,1)** (si paquet `arch` installé).  
-- Sélection auto par **sMAPE**. Graphique avec **bandes d’incertitude** et **zone ombrée** = futur.
+- **ARIMA** & **SARIMA (saisonnalité 5 jours ouvrés)**.  
+- **ARX+GARCH(1,1)** (*si `arch` est installé*) : moyenne AR(1) + volatilité conditionnelle.  
+- **Sélection automatique** par **sMAPE** (mini-validation).  
+- **Graphique** : trajectoire prévue + **intervalle** (IC 80% pour ARIMA/SARIMA ou bandes de volatilité pour GARCH).
         """)
 
 # ------ utilitaire : détecter fréquence & pas/an ------
 def _infer_freq_and_steps_per_year(idx: pd.DatetimeIndex) -> Tuple[str, int]:
     inf = pd.infer_freq(idx)
     if inf is None:
+        # fallback : pas médian
         delta = idx.to_series().diff().median()
         if pd.isna(delta):
             return "D", 252
         days = max(1, int(round(delta / pd.Timedelta(days=1))))
-        if days == 1: return "B", 252
+        if days == 1: return "D", 252
         if 5 <= days <= 8: return "W", 52
         if 28 <= days <= 31: return "M", 12
-        return "B", 252
+        return "D", 252
     if inf.startswith("B") or inf.startswith("D"):
-        return "B", 252
+        return "B", 252  # jours ouvrés
     if inf.startswith("W"):
         return "W", 52
     if inf.startswith("M"):
         return "M", 12
-    return "B", 252
+    # défaut
+    return "D", 252
 
 # --------------------------- APP ---------------------------
 def main():
@@ -862,19 +984,21 @@ def main():
             st.header("Données prix")
             uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
             if uploader is not None:
-                df_original = load_data(uploader); st.success("Données de prix chargées")
+                df_original = load_data(uploader)
+                st.success("Données de prix chargées")
             else:
                 if os.path.exists(DEFAULT_PRICE_PATH):
                     df_original = load_data(DEFAULT_PRICE_PATH)
                     st.info(f"Données de prix par défaut : {DEFAULT_PRICE_PATH}")
                 else:
-                    st.error("Aucun fichier de prix. Importez un CSV"); st.stop()
+                    st.error("Aucun fichier de prix. Importez un CSV")
+                    st.stop()
 
-            shares = st.number_input("Actions en circulation (exactes)", min_value=1,
-                                     value=DEFAULT_SHARES_OUTSTANDING, step=1000)
+            shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
 
             st.header("Période & Fréquence (GLOBAL)")
-            freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0)
+            freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0,
+                                help="S'applique à tous les onglets.")
             st.session_state.global_freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
 
             dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
@@ -882,7 +1006,8 @@ def main():
                 st.session_state.global_date_start.date() if st.session_state.global_date_start is not None else dmin,
                 st.session_state.global_date_end.date()   if st.session_state.global_date_end   is not None else dmax
             )
-            dr = st.date_input("Fenêtre d'analyse (globale)", value=default_range, min_value=dmin, max_value=dmax)
+            dr = st.date_input("Fenêtre d'analyse (globale)", value=default_range, min_value=dmin, max_value=dmax,
+                               help="Utilisée dans *Tableau de bord* et *Prédiction*.")
             if isinstance(dr, tuple):
                 st.session_state.global_date_start = pd.to_datetime(dr[0])
                 st.session_state.global_date_end   = pd.to_datetime(dr[1])
@@ -990,68 +1115,75 @@ def main():
         m1,m2,m3,m4,m5,m6 = st.columns(6)
         m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
         m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
-        m3.metric("Rend. annualisé", format_pct_scientific(metrics['annualized_return']))
+        m3.metric("Rend. annualisé", format_pct_scientific(metrics['annualized_return']))  # scientifique
         m4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
         m5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
         m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
         st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
+        # ===== 1) GRAPHIQUE TECHNIQUE =====
         st.subheader("Graphique technique")
         tech_fig = plotly_combined_chart(df, chart_type, params)
         st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
+        # ===== 2) Dividend Yield & PER (AUTO) =====
         extra_fig = plot_dividend_and_pe(ann_df)
         if extra_fig is not None:
             st.subheader("Dividend Yield & PER")
             st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
 
+        # ===== 3) Graphiques fondamentaux =====
         st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
         if (ann_df is not None) and (not ann_df.empty):
-            fund_fig = make_subplots(rows=2, cols=2,
-                subplot_titles=['Capitalisation (fin d’année)', 'Rendement annuel (%)','Volatilité annualisée (%)', 'Volume annuel (titres)'],
-                vertical_spacing=0.16, horizontal_spacing=0.08)
-            x = ann_df[_detect_year_column(ann_df) or 'Annee']
-            fund_fig.add_trace(go.Bar(x=x, y=ann_df['market_cap_fin_annee_FCFA']), row=1, col=1)
-            fund_fig.add_trace(go.Scatter(x=x, y=ann_df['annual_return_%'], mode='lines+markers'), row=1, col=2)
-            fund_fig.add_trace(go.Scatter(x=x, y=ann_df['vol_annual_%'], mode='lines+markers'), row=2, col=1)
-            fund_fig.add_trace(go.Bar(x=x, y=ann_df['vol_sum']), row=2, col=2)
-            fund_fig.update_layout(height=480, showlegend=False, margin=dict(t=28, b=22, l=24, r=10))
-            set_fig_template(fund_fig)
+            fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
+            st.markdown(summarize_fundamentals(ann_df))
+            st.markdown("**Régimes de marché (par périodes standards)**")
+            for line in describe_market_regimes(ann_df):
+                st.write(f"- {line}")
+            fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
+            st.download_button(
+                f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
+                ann_df.to_csv(index=False).encode('utf-8'),
+                file_name=fname, mime="text/csv"
+            )
         else:
             st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
 
+        # ===== 4) BACKTEST =====
         st.subheader(f"Backtesting — {strat}")
-        if len(df) >= 10:
+        if len(df) < 10:
+            st.warning("Période trop courte pour backtester.")
+        else:
             if strat == "SMA Crossover":
-                bt_df, bt_stats, _ = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
+                bt_df, bt_stats, bt_trades = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
             elif strat == "RSI + MACD":
-                bt_df, bt_stats, _ = backtest_rsi_macd(
+                bt_df, bt_stats, bt_trades = backtest_rsi_macd(
                     df, rsi_window=int(rsi_window),
                     rsi_buy=float(bt_rsi_buy), rsi_confirm=float(bt_rsi_confirm), rsi_sell=float(bt_rsi_sell),
                     macd_fast=int(bt_macd_fast), macd_slow=int(bt_macd_slow), macd_signal=int(bt_macd_signal),
                     fee_bps=float(bt_fee)
                 )
             else:
-                bt_df, bt_stats, _ = backtest_mixed_sma_rsi(
+                bt_df, bt_stats, bt_trades = backtest_mixed_sma_rsi(
                     df, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
                     rsi_window=int(rsi_window), rsi_enter=float(mix_rsi_enter), rsi_exit=float(mix_rsi_exit),
                     fee_bps=float(mix_fee)
                 )
+
             d1,d2,d3,d4,d5,d6 = st.columns(6)
             d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
             d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
             d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.1f}%")
-            d4.metric("Perf. annualisée", format_pct_scientific(bt_stats['perf_annualisee_%']))
+            d4.metric("Perf. annualisée", format_pct_scientific(bt_stats['perf_annualisee_%']))  # scientifique
             d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.1f}%")
             d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
+
             eq_fig = go.Figure()
             eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity', line=dict(width=2.4)))
             eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
             set_fig_template(eq_fig)
             st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
-        else:
-            st.warning("Période trop courte pour backtester.")
 
     # ===================== TAB PRÉDICTION =====================
     with tab_forecast:
@@ -1060,24 +1192,28 @@ def main():
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
             else:
-                st.error("Chargez d'abord les données dans l'onglet principal."); st.stop()
+                st.error("Chargez d'abord les données dans l'onglet principal.")
+                st.stop()
 
         dmin_f, dmax_f = df_original['Date'].min().date(), df_original['Date'].max().date()
 
         use_global_window = st.checkbox("Utiliser la même fenêtre que le Tableau de bord (global)", value=True)
         if use_global_window:
-            start_f = st.session_state.global_date_start; end_f = st.session_state.global_date_end
+            start_f = st.session_state.global_date_start
+            end_f   = st.session_state.global_date_end
         else:
             dr_f = st.date_input("Fenêtre spécifique à la prédiction", value=(dmin_f, dmax_f), min_value=dmin_f, max_value=dmax_f, key="pred_dates")
             start_f, end_f = (pd.to_datetime(dr_f[0]), pd.to_datetime(dr_f[1])) if isinstance(dr_f, tuple) else (pd.to_datetime(dmin_f), pd.to_datetime(dmax_f))
 
+        # Série de travail
         df_pred = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
         df_pred = df_pred.sort_values('Date').reset_index(drop=True)
         s = df_pred.set_index('Date')['Close'].astype(float)
         if len(s) < 30:
-            st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre."); st.stop()
+            st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
+            st.stop()
 
-        # Horizon courant + bouton 5 ans
+        # Horizon : entrée libre + bouton 5 ans auto
         freq_code, steps_per_year = _infer_freq_and_steps_per_year(s.index)
         colH1, colH2 = st.columns([2,1])
         with colH1:
@@ -1089,38 +1225,33 @@ def main():
                 horizon = 5 * steps_per_year
         st.caption(f"Fréquence détectée : **{freq_code}** • Pas/an ≈ **{steps_per_year}** • Horizon actuel : **{horizon}**")
 
-        with st.spinner("Sélection du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
+        with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
             best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
 
-        # Courbe 5 ans (même historique)
-        horizon_5y = 5 * steps_per_year
-        with st.spinner("Calcul de la projection 5 ans…"):
-            best5 = choose_best_model(s, horizon=int(horizon_5y), valid_ratio=0.2)
-
         hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
-        fc_dual_fig = forecast_figure_dual(
-            hist_df, np.asarray(best['pred'], dtype=float), int(horizon), bands_main=best.get("bands"),
-            pred_5y=np.asarray(best5['pred'], dtype=float), horizon_5y=int(horizon_5y),
-            title=f"Prévision (meilleur modèle : {best['name']}) + Projection 5 ans ({best5['name']})"
-        )
-        st.plotly_chart(fc_dual_fig, use_container_width=True, config={"displaylogo": False})
+        fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
+                                 bands=best.get("bands"),
+                                 title=f"Prévision (meilleur modèle : {best['name']})")
+        st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
-        # résumé + export horizon courant
-        st.markdown(f"**Résumé**: {best['name']} • sMAPE ≈ {best['score']:.2f}% • Horizon: {int(horizon)} pas.  \n"
-                    f"**Projection 5 ans**: {best5['name']} • sMAPE ≈ {best5['score']:.2f}% • Pas ≈ {int(horizon_5y)}.")
+        last_price = float(s.iloc[-1])
+        recent_returns = s.pct_change().dropna().tail(20)
+        st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
+
         last_date = hist_df['Date'].iloc[-1]
         freq_for_range = "B" if freq_code in ("B","D") else ("W" if freq_code=="W" else "M")
         future_idx = pd.date_range(last_date, periods=int(horizon)+1, freq=freq_for_range)[1:]
         out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
-        st.download_button("Télécharger les prévisions (CSV - horizon courant)", out_fc.to_csv(index=False).encode('utf-8'),
-                           file_name="previsions_auto_horizon.csv", mime="text/csv")
+        st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
+                           file_name="previsions_auto.csv", mime="text/csv")
 
         if not ARCH_AVAILABLE:
-            st.caption("💡 Pour activer **GARCH**, installez le paquet `arch` (sinon il sera ignoré).")
+            st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
 
     # ===================== TAB GUIDE =====================
     with tab_guide:
         guide_tab()
+
 
 if __name__ == "__main__":
     main()
