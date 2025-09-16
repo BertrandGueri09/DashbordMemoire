@@ -1,4 +1,4 @@
-# memoire_gueri_dashboard.py — Thème sombre uniquement + Filtre global par dates + Exports PNG + Régimes + Titre centré
+# memoire_gueri_dashboard.py — Thème sombre uniquement + Exports PNG + Régimes + Titre centré + Prédiction auto
 # ------------------------------------------------------------------------------------------------------------
 
 import streamlit as st
@@ -12,6 +12,10 @@ from typing import Union, Dict, Tuple, List, Optional
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+
+# === Nouveaux imports pour la prédiction ===
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 warnings.filterwarnings('ignore')
 
@@ -96,27 +100,6 @@ def set_fig_template(fig: go.Figure):
     fig.update_layout(template="plotly_dark",
                       paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
                       font=dict(color="#e8e6e3"))
-
-# --------------------------- FORMATAGE COMPACT (UNIQUEMENT % ANNUALISÉS) ---------------------------
-def format_pct_compact(value: float) -> str:
-    """
-    Compacte uniquement les pourcentages potentiellement gigantesques.
-    Ex: 12_345  -> '12.3k %' ; 7_200_000 -> '7.2M %' ; très grands -> notation scientifique.
-    """
-    try:
-        v = float(value)
-    except Exception:
-        return str(value)
-    sign = "-" if v < 0 else ""
-    v = abs(v)
-    if v < 1_000:
-        return f"{sign}{v:.1f}%"
-    if v < 1_000_000:
-        return f"{sign}{v/1_000:.1f}k%"
-    if v < 1_000_000_000:
-        return f"{sign}{v/1_000_000:.1f}M%"
-    # au-delà, on passe en scientifique pour rester lisible
-    return f"{sign}{v:.2e}%"
 
 # --------------------------- I/O & PARSING ---------------------------
 @st.cache_data
@@ -500,7 +483,7 @@ def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, s
     ann['max_drawdown_intra_%'] = ann['max_drawdown_intra_%'].round(2)
     return ann
 
-def _parse_year_value_df(uploaded: io.BytesIO, value_cols_candidates: List[str]) -> Optional[pd.DataFrame]:
+def _parse_year_value_df(uploaded: Union[str, io.BytesIO], value_cols_candidates: List[str]) -> Optional[pd.DataFrame]:
     try:
         df = pd.read_csv(uploaded)
     except Exception:
@@ -563,6 +546,19 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
             out = out.merge(temp, on='Annee', how='left')
             if 'EPS' not in out.columns and 'net_income' in out.columns:
                 out['EPS'] = out['net_income'] / float(shares_outstanding)
+
+    if 'EPS' not in out.columns: out['EPS'] = np.nan
+
+    # Estimation via DPS + payout (dernière année)
+    if manual_dps is not None and manual_payout_pct is not None and len(out) > 0:
+        try:
+            last_year = int(out['Annee'].max())
+            pay = max(min(manual_payout_pct/100.0, 0.9999), 0.0001)
+            est_eps = manual_dps / pay
+            out.loc[out['Annee'] == last_year, 'DPS'] = out.loc[out['Annee'] == last_year, 'DPS'].fillna(manual_dps)
+            out.loc[out['Annee'] == last_year, 'EPS'] = out.loc[out['Annee'] == last_year, 'EPS'].fillna(est_eps)
+        except Exception:
+            pass
 
     if 'DPS' in out.columns:
         out['Dividends_Total_FCFA'] = (out['DPS'] * float(shares_outstanding)).round(0)
@@ -629,8 +625,10 @@ def summarize_fundamentals(ann_df: pd.DataFrame) -> str:
     last_mdd = float(last['max_drawdown_intra_%']) if pd.notna(last['max_drawdown_intra_%']) else None
     vol_mean = ann_df['vol_sum'].dropna(); vol_mean = float(vol_mean.mean()) if not vol_mean.empty else None
     first = ann_df.iloc[0]; first_year = int(first[yc]); first_price = float(first['last_price'])
-    n_years = max(1, last_year - first_year); cagr = None
-    if first_price > 0: cagr = (last_price / first_price) ** (1 / n_years) - 1
+    n_years = max(1, last_year - first_year)
+    cagr = None
+    if first_price > 0:
+        cagr = (last_price / first_price) ** (1 / n_years) - 1
     div_yield = ann_df['Dividend_Yield_%'].iloc[-1] if 'Dividend_Yield_%' in ann_df.columns else None
     div_total = ann_df['Dividends_Total_FCFA'].iloc[-1] if 'Dividends_Total_FCFA' in ann_df.columns else None
     per_last  = ann_df['PER'].iloc[-1] if 'PER' in ann_df.columns else None
@@ -660,7 +658,7 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
     out = []
     for a, b in windows:
         s, e = max(start, a), min(end, b)
-        if s > e: 
+        if s > e:
             continue
         block = df[(df[yc] >= s) & (df[yc] <= e)]
         if block.empty:
@@ -683,6 +681,225 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
         out = [f"Période couverte {start}–{end} sans bloc standard complet ; tendance moyenne ≈ {df['annual_return_%'].mean():.1f}%."]
     return out
 
+# --------------------------- PRÉDICTION : Auto-sélection de modèle ---------------------------
+def _to_ts(df, freq_code):
+    """Série temporelle à partir de df (Date, Close) déjà resamplé selon freq_code."""
+    s = df[['Date', 'Close']].dropna().copy()
+    s = s.set_index('Date')['Close'].asfreq({'D':'D','W':'W','M':'M'}[freq_code], method='pad')
+    return s
+
+def _rmse(y_true, y_pred):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    mask = np.isfinite(y_true) & np.isfinite(y_pred)
+    if mask.sum() == 0: return np.inf
+    return float(np.sqrt(np.mean((y_true[mask]-y_pred[mask])**2)))
+
+def _expanding_backtest(series, model_fit_fn, min_train=60, horizon=1, max_steps=40):
+    """
+    Petit backtest expandant: on entraîne sur une fenêtre qui grandit,
+    on prédit 'horizon' point(s) en avant, on collecte les RMSE.
+    """
+    y = series.dropna().astype(float)
+    n = len(y)
+    if n < min_train + horizon + 1:
+        return np.inf  # série trop courte
+    preds, reals = [], []
+    steps = 0
+    for t in range(min_train, n - horizon):
+        train = y.iloc[:t]
+        test  = y.iloc[t:t+horizon]
+        try:
+            fc = model_fit_fn(train, steps=horizon)
+            preds.append(fc[-1])
+            reals.append(test.iloc[-1])
+        except Exception:
+            return np.inf
+        steps += 1
+        if steps >= max_steps:
+            break
+    return _rmse(reals, preds)
+
+def _fit_predict_arima(series, order=(1,1,1), steps=12):
+    m = SARIMAX(series, order=order, enforce_stationarity=False, enforce_invertibility=False)
+    res = m.fit(disp=False)
+    fc = res.get_forecast(steps=steps)
+    mean = fc.predicted_mean
+    ci = fc.conf_int(alpha=0.05)  # 95%
+    return res, mean, ci
+
+def _fit_predict_ets(series, trend='add', damped=False, seasonal=None, seasonal_periods=None, steps=12):
+    m = ExponentialSmoothing(series, trend=trend, damped_trend=damped,
+                             seasonal=seasonal, seasonal_periods=seasonal_periods, initialization_method="estimated")
+    res = m.fit(optimized=True)
+    # ETS n'a pas d'IC natif ici; on trace sans IC
+    idx = pd.date_range(series.index[-1], periods=steps+1, freq=series.index.freq)[1:]
+    fc = res.forecast(steps)
+    ci = None
+    return res, pd.Series(fc.values, index=idx), ci
+
+def _fit_predict_naive(series, steps=12):
+    last = float(series.iloc[-1])
+    idx = pd.date_range(series.index[-1], periods=steps+1, freq=series.index.freq)[1:]
+    fc = pd.Series([last]*steps, index=idx)
+    return None, fc, None
+
+def _select_best_model(series, freq_code, horizon, seasonal_try=True):
+    """
+    Essaie plusieurs ARIMA, ETS, et Naïf.
+    Critère: scoreboard = AIC_norm + RMSE_norm (faible = meilleur).
+    """
+    results = []
+
+    # --- Candidats ARIMA légers ---
+    arima_grid = [(0,1,1), (1,1,0), (1,1,1), (2,1,1), (1,0,1)]
+    def fitfn(order):
+        def _inner(train, steps):
+            res, mean, _ = _fit_predict_arima(train, order=order, steps=steps)
+            return mean.values
+        return _inner
+
+    for order in arima_grid:
+        try:
+            # AIC in-sample
+            res = SARIMAX(series, order=order, enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
+            aic = res.aic if np.isfinite(res.aic) else np.inf
+            # RMSE backtest
+            rmse = _expanding_backtest(series, model_fit_fn=fitfn(order), min_train=max(40, int(len(series)*0.4)),
+                                       horizon=min(horizon, 3), max_steps=30)
+            results.append(("ARIMA", {"order":order}, aic, rmse))
+        except Exception:
+            continue
+
+    # --- Candidats ETS ---
+    ets_specs = [
+        ("add", False, None, None),
+        ("add", True,  None, None),
+        ("mul", False, None, None),
+    ]
+    # selon la fréquence, on peut tester une saisonnalité simple
+    if seasonal_try:
+        sp = {'D':7, 'W':52, 'M':12}[freq_code]
+        ets_specs += [
+            ("add", False, "add", sp),
+            ("mul", False, "mul", sp),
+        ]
+
+    def fitfn_ets(trend, damped, seas, sp):
+        def _inner(train, steps):
+            _, mean, _ = _fit_predict_ets(train, trend=trend, damped=damped, seasonal=seas, seasonal_periods=sp, steps=steps)
+            return mean.values
+        return _inner
+
+    for (trend, damped, seas, sp) in ets_specs:
+        try:
+            res = ExponentialSmoothing(series, trend=trend, damped_trend=damped,
+                                       seasonal=seas, seasonal_periods=sp, initialization_method="estimated").fit(optimized=True)
+            aic = res.aic if hasattr(res, "aic") and np.isfinite(res.aic) else np.inf
+            rmse = _expanding_backtest(series, model_fit_fn=fitfn_ets(trend, damped, seas, sp),
+                                       min_train=max(40, int(len(series)*0.4)),
+                                       horizon=min(horizon, 3), max_steps=30)
+            results.append(("ETS", {"trend":trend, "damped":damped, "seasonal":seas, "sp":sp}, aic, rmse))
+        except Exception:
+            continue
+
+    # --- Naïf (baseline) ---
+    def fitfn_naive(train, steps):
+        last = float(train.iloc[-1])
+        return np.array([last]*steps, dtype=float)
+    rmse_naive = _expanding_backtest(series, model_fit_fn=fitfn_naive,
+                                     min_train=max(20, int(len(series)*0.3)),
+                                     horizon=min(horizon, 3), max_steps=30)
+    results.append(("NAIVE", {}, 9_999_999.0, rmse_naive))  # AIC dummy élevé
+
+    # Normalisation et score
+    aics  = np.array([r[2] for r in results], dtype=float)
+    rmses = np.array([r[3] for r in results], dtype=float)
+    aics[np.isinf(aics)] = np.nan
+    aics_norm  = (aics - np.nanmin(aics)) / (np.nanmax(aics) - np.nanmin(aics) + 1e-9)
+    rmses_norm = (rmses - np.nanmin(rmses)) / (np.nanmax(rmses) - np.nanmin(rmses) + 1e-9)
+    scores = aics_norm + rmses_norm
+
+    best_idx = int(np.nanargmin(scores))
+    best = results[best_idx]
+    return {
+        "results": results,            # liste (model_name, params, AIC, RMSE)
+        "scores": scores.tolist(),
+        "best": best                   # tuple
+    }
+
+def _fit_best_and_forecast(series, best_tuple, horizon):
+    name, params, _, _ = best_tuple
+    if name == "ARIMA":
+        res, mean, ci = _fit_predict_arima(series, order=params["order"], steps=horizon)
+        return name, params, mean, ci
+    elif name == "ETS":
+        res, mean, ci = _fit_predict_ets(series, trend=params["trend"], damped=params["damped"],
+                                         seasonal=params["seasonal"], seasonal_periods=params["sp"], steps=horizon)
+        return name, params, mean, ci
+    else:
+        _, mean, ci = _fit_predict_naive(series, steps=horizon)
+        return name, params, mean, ci
+
+def run_prediction_tab(df_resampled, freq_code):
+    st.subheader("Prédiction automatique (sélection de modèle)")
+    if df_resampled is None or df_resampled.empty:
+        st.info("Aucune donnée filtrée pour la prédiction.")
+        return
+
+    # horizon par défaut suivant la fréquence
+    default_h = {'D': 30, 'W': 12, 'M': 12}[freq_code]
+    horizon = st.number_input("Horizon de prévision (périodes)", min_value=1, max_value=120, value=default_h, step=1)
+
+    series = _to_ts(df_resampled, freq_code)
+    if series.dropna().shape[0] < 30:
+        st.warning("Série trop courte pour une sélection robuste. Utilisation du modèle naïf.")
+        name, params, mean, ci = _fit_best_and_forecast(series, ("NAIVE", {}, np.inf, np.inf), horizon)
+        rep = pd.DataFrame([["NAIVE", "—", np.nan, np.nan, 0.0]], columns=["Modèle","Paramètres","AIC","RMSE backtest","Score combiné"])
+        st.dataframe(rep, use_container_width=True)
+    else:
+        with st.spinner("Sélection du meilleur modèle en cours…"):
+            sel = _select_best_model(series, freq_code, horizon, seasonal_try=True)
+        best = sel["best"]
+        name, params, mean, ci = _fit_best_and_forecast(series, best, horizon)
+
+        # tableau récap des scores
+        rep = pd.DataFrame(
+            [(m, str(p), aic, rmse, sc) for (m,p,aic,rmse), sc in zip(sel["results"], sel["scores"])],
+            columns=["Modèle", "Paramètres", "AIC", "RMSE backtest", "Score combiné"]
+        ).sort_values("Score combiné")
+        st.dataframe(rep, use_container_width=True)
+
+        st.success(f"**Meilleur modèle** : {name} | **Paramètres** : {params}")
+
+    # Graphe historique + prévision + IC
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=series.index, y=series.values, name="Historique", mode="lines"))
+
+    fig.add_trace(go.Scatter(x=mean.index, y=mean.values, name="Prévision", mode="lines"))
+    if ci is not None:
+        # colonnes ci : lower/upper
+        lower = ci.iloc[:, 0]
+        upper = ci.iloc[:, -1]
+        fig.add_trace(go.Scatter(x=mean.index, y=upper.values, name="IC 95% sup.", mode="lines",
+                                 line=dict(width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=mean.index, y=lower.values, name="IC 95% inf.", mode="lines",
+                                 fill='tonexty', line=dict(width=0), opacity=0.2, showlegend=False))
+
+    fig.update_layout(margin=dict(t=10, b=10, l=10, r=10), height=420)
+    fig.update_yaxes(title_text="Prix estimé (FCFA)")
+    fig.update_xaxes(title_text="Temps")
+    try:
+        set_fig_template(fig)
+    except Exception:
+        pass
+    st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+
+    # Export CSV
+    out = pd.DataFrame({"date": mean.index, "forecast": mean.values})
+    st.download_button("Télécharger les prévisions (CSV)", out.to_csv(index=False).encode("utf-8"),
+                       file_name="previsions_auto.csv", mime="text/csv")
+
 # --------------------------- APP ---------------------------
 def main():
     # ======= Appliquer thème sombre =======
@@ -690,7 +907,7 @@ def main():
 
     # ======= Titre centré =======
     centered_title("Dashboard Marchés Boursiers – BRVM",
-                   "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests")
+                   "Analyse technique & fondamentale | Dividend Yield/PE auto | Backtests | Prédiction auto")
 
     # ===== SIDEBAR =====
     with st.sidebar:
@@ -713,8 +930,7 @@ def main():
         freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0)
         freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
         dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
-        dr = st.date_input("Fenêtre d'analyse (appliquée partout)", value=(dmin, dmax), min_value=dmin, max_value=dmax)
-        # Fenêtre globale appliquée à TOUT : technique, backtest et fondamentaux
+        dr = st.date_input("Fenêtre d'analyse (graphique, backtests & fondamentaux)", value=(dmin, dmax), min_value=dmin, max_value=dmax)
         start_date, end_date = (pd.to_datetime(dr[0]), pd.to_datetime(dr[1])) if isinstance(dr, tuple) else (pd.to_datetime(dmin), pd.to_datetime(dmax))
 
         st.header("Indicateurs techniques")
@@ -731,6 +947,7 @@ def main():
                 rsi_window = st.slider("RSI", 5, 30, 14, 1)
                 macd_fast = st.slider("MACD Rapide", 5, 20, 12, 1)
                 macd_slow = st.slider("MACD Lent", 20, 40, 26, 1)
+
         params = {
             'show_sma':'MM' in indicators, 'sma1':sma1, 'sma2':sma2,
             'show_ema':'EMA' in indicators, 'ema1':ema1,
@@ -778,20 +995,14 @@ def main():
         manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
         manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
-    # ===== TRAITEMENTS : fenêtrage global =====
-    # 1) Filtre global pour toutes les analyses
-    df_window = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
-    if df_window.empty:
-        st.error("Aucune donnée dans l'intervalle sélectionné. Veuillez élargir la fenêtre de dates.")
-        st.stop()
+    # ===== TRAITEMENTS : tout est filtré par la période choisie =====
+    df_filtered = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
+    df = resample_ohlcv(df_filtered, freq_code=freq_code)
+    df = add_indicators(df, params)
+    metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
 
-    # 2) Série resamplée pour le graphique technique et le backtest
-    df_resampled = resample_ohlcv(df_window, freq_code=freq_code)
-    df_with_indic = add_indicators(df_resampled, params)
-    metrics = performance_metrics(df_with_indic, rf_annual_pct=rf, freq_code=freq_code)
-
-    # 3) Fondamentaux calculés sur la FENÊTRE (et non plus sur tout l'historique)
-    ann_df = compute_market_fundamentals_from_original(df_window, shares)
+    # Fondamentaux calculés à partir du filtrage aussi (pour cohérence dashboard)
+    ann_df = compute_market_fundamentals_from_original(df_filtered, shares)
 
     # DPS / EPS (upload > défauts)
     if dps_uploader is not None:
@@ -814,89 +1025,97 @@ def main():
     manual_payout_val = manual_payout if manual_payout > 0 else None
     ann_df = enrich_with_dividends_eps(ann_df, shares, dps_df, eps_or_net_df, manual_dps_val, manual_payout_val)
 
-    span = _year_span(ann_df)
-    fund_title_suffix = f"({span[0]}–{span[1]})" if span else "(n/a)"
+    # ===== TABS : Dashboard & Prédiction =====
+    tab1, tab2 = st.tabs(["Dashboard", "Prédiction"])
 
-    # ===== MÉTRIQUES =====
-    st.subheader("Métriques principales")
-    badge = {"D":"Jour","W":"Semaine","M":"Mois"}[freq_code]
-    m1,m2,m3,m4,m5,m6 = st.columns(6)
-    m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
-    m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
-    # (compact UNIQUEMENT ici)
-    m3.metric("Rend. annualisé", format_pct_compact(metrics['annualized_return']))
-    m4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
-    m5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
-    m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
-    st.caption(f"Période affichée : {df_with_indic['Date'].min().date()} → {df_with_indic['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
+    with tab1:
+        # ===== MÉTRIQUES =====
+        st.subheader("Métriques principales")
+        badge = {"D":"Jour","W":"Semaine","M":"Mois"}[freq_code]
+        m1,m2,m3,m4,m5,m6 = st.columns(6)
+        m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
+        m2.metric("Rendement total", f"{metrics['total_return']:.2f}%")
+        m3.metric("Rend. annualisé", f"{metrics['annualized_return']:.2f}%")
+        m4.metric("Volatilité", f"{metrics['volatility']:.2f}%")
+        m5.metric("Max DD", f"{metrics['max_drawdown']:.2f}%")
+        m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
+        st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
-    # ===== 1) GRAPHIQUE TECHNIQUE =====
-    st.subheader("Graphique technique")
-    tech_fig = plotly_combined_chart(df_with_indic, chart_type, params)
-    st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
+        # ===== 1) GRAPHIQUE TECHNIQUE =====
+        st.subheader("Graphique technique")
+        tech_fig = plotly_combined_chart(df, chart_type, params)
+        st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===== 2) Dividend Yield & PER (AUTO sur la fenêtre) =====
-    extra_fig = plot_dividend_and_pe(ann_df)
-    if extra_fig is not None:
-        st.subheader("Dividend Yield & PER")
-        st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
+        # ===== 2) Dividend Yield & PER (AUTO) =====
+        extra_fig = plot_dividend_and_pe(ann_df)
+        if extra_fig is not None:
+            st.subheader("Dividend Yield & PER")
+            st.plotly_chart(extra_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===== 3) Graphiques fondamentaux (fenêtre) =====
-    st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
-    if (ann_df is not None) and (not ann_df.empty):
-        fund_fig = plot_market_fundamentals_summary(ann_df)
-        st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
+        # ===== 3) Graphiques fondamentaux =====
+        span = _year_span(ann_df)
+        fund_title_suffix = f"({span[0]}–{span[1]})" if span else "(n/a)"
+        st.subheader(f"Fondamentaux de marché {fund_title_suffix}")
+        if (ann_df is not None) and (not ann_df.empty):
+            fund_fig = plot_market_fundamentals_summary(ann_df)
+            st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
 
-        # ===== 4) Synthèse fondamentale =====
-        st.markdown(summarize_fundamentals(ann_df))
+            # ===== 4) Synthèse fondamentale =====
+            st.markdown(summarize_fundamentals(ann_df))
 
-        # ===== 5) Régimes de marché =====
-        st.markdown("**Régimes de marché (par périodes standards)**")
-        for line in describe_market_regimes(ann_df):
-            st.write(f"- {line}")
+            # ===== 5) Régimes de marché =====
+            st.markdown("**Régimes de marché (par périodes standards)**")
+            for line in describe_market_regimes(ann_df):
+                st.write(f"- {line}")
 
-        # ===== 6) Téléchargement fondamentaux (fenêtre) =====
-        fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
-        st.download_button(
-            f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
-            ann_df.to_csv(index=False).encode('utf-8'),
-            file_name=fname, mime="text/csv"
-        )
-    else:
-        st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes) pour la fenêtre sélectionnée.")
+            # ===== 6) Téléchargement fondamentaux =====
+            fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
+            st.download_button(
+                f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
+                ann_df.to_csv(index=False).encode('utf-8'),
+                file_name=fname, mime="text/csv"
+            )
+        else:
+            st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
 
-    # ===== 7) BACKTEST (sur la fenêtre filtrée & resamplée) =====
-    st.subheader(f"Backtesting — {strat}")
-    if strat == "SMA Crossover":
-        bt_df, bt_stats, bt_trades = backtest_sma(df_with_indic, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
-    elif strat == "RSI + MACD":
-        bt_df, bt_stats, bt_trades = backtest_rsi_macd(
-            df_with_indic, rsi_window=int(rsi_window),
-            rsi_buy=float(bt_rsi_buy), rsi_confirm=float(bt_rsi_confirm), rsi_sell=float(bt_rsi_sell),
-            macd_fast=int(bt_macd_fast), macd_slow=int(bt_macd_slow), macd_signal=int(bt_macd_signal),
-            fee_bps=float(bt_fee)
-        )
-    else:
-        bt_df, bt_stats, bt_trades = backtest_mixed_sma_rsi(
-            df_with_indic, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
-            rsi_window=int(rsi_window), rsi_enter=float(mix_rsi_enter), rsi_exit=float(mix_rsi_exit),
-            fee_bps=float(mix_fee)
-        )
+        # ===== 7) BACKTEST =====
+        st.subheader(f"Backtesting — {strat}")
+        if strat == "SMA Crossover":
+            bt_df, bt_stats, bt_trades = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
+        elif strat == "RSI + MACD":
+            bt_df, bt_stats, bt_trades = backtest_rsi_macd(
+                df, rsi_window=int(rsi_window),
+                rsi_buy=float(bt_rsi_buy), rsi_confirm=float(bt_rsi_confirm), rsi_sell=float(bt_rsi_sell),
+                macd_fast=int(bt_macd_fast), macd_slow=int(bt_macd_slow), macd_signal=int(bt_macd_signal),
+                fee_bps=float(bt_fee)
+            )
+        else:
+            bt_df, bt_stats, bt_trades = backtest_mixed_sma_rsi(
+                df, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
+                rsi_window=int(rsi_window), rsi_enter=float(mix_rsi_enter), rsi_exit=float(mix_rsi_exit),
+                fee_bps=float(mix_fee)
+            )
 
-    d1,d2,d3,d4,d5,d6 = st.columns(6)
-    d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
-    d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
-    d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.1f}%")
-    # (compact UNIQUEMENT ici)
-    d4.metric("Perf. annualisée", format_pct_compact(bt_stats['perf_annualisee_%']))
-    d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.1f}%")
-    d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
+        d1,d2,d3,d4,d5,d6 = st.columns(6)
+        d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
+        d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
+        d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.2f}%")
+        d4.metric("Perf. annualisée", f"{bt_stats['perf_annualisee_%']:.2f}%")
+        d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.2f}%")
+        d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
 
-    eq_fig = go.Figure()
-    eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
-    eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
-    set_fig_template(eq_fig)
-    st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
+        eq_fig = go.Figure()
+        eq_fig.add_trace(go.Scatter(x=bt_df['Date'], y=bt_df['equity'], mode='lines', name='Équity'))
+        eq_fig.update_layout(height=280, margin=dict(t=6,b=6,l=6,r=6))
+        try:
+            set_fig_template(eq_fig)
+        except Exception:
+            pass
+        st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
+
+    with tab2:
+        # Utilise le df déjà **filtré** et **resamplé** (df) pour cohérence avec la période & la fréquence
+        run_prediction_tab(df, freq_code)
 
 if __name__ == "__main__":
     main()
