@@ -1,6 +1,5 @@
 # memoire_gueri_dashboard.py — Thème sombre + Filtres globaux + Fondamentaux + Backtests + Auto-forecast (résumé investisseur)
 # ------------------------------------------------------------------------------------------------------------
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -51,28 +50,29 @@ h2, h3, h4 { margin-bottom: 0.25rem; }
 hr { margin: 0.5rem 0 0.6rem 0; }
 .small-note { font-size: 0.9rem; color: #c9c7c4; }
 
-/* Titre centré — taille contrôlée et anti-ligatures */
+/* Titre centré — lisibilité renforcée (anti-glitches) */
 .app-title {
   text-align: center;
-  font-family: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
-  font-weight: 700;
-  font-size: clamp(22px, 2.4vw, 32px); /* plus raisonnable */
+  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+  font-weight: 800;
+  font-size: clamp(24px, 2.6vw, 34px);
   line-height: 1.15;
-  letter-spacing: 0.1px;
-  margin: 0.2rem 0 0.4rem 0;
+  letter-spacing: 0;             /* pas d'espacement artificiel */
+  margin: 0.3rem 0 0.5rem 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-variant-ligatures: none;
+  font-variant-ligatures: none;  /* coupe les ligatures */
   font-feature-settings: "liga" 0, "clig" 0, "kern" 1;
+  text-rendering: optimizeLegibility;
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
 .app-subtitle {
   text-align: center;
-  margin-top: -0.2rem;
-  margin-bottom: 0.6rem;
-  opacity: 0.85;
-  font-size: clamp(12px, 1.1vw, 15px);
+  margin-top: -0.1rem;
+  margin-bottom: 0.7rem;
+  opacity: 0.9;
+  font-size: clamp(12px, 1.15vw, 16px);
 }
 
 /* Sombre */
@@ -799,7 +799,6 @@ def plot_forecast(history: pd.DataFrame, y_col: str, yhat: np.ndarray, horizon: 
     return fig
 
 def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, recent_returns: pd.Series) -> str:
-    """Résumé orienté décision : direction, pente, bande prévue, momentum & risque."""
     name = best.get("name","?")
     score = best.get("score", np.nan)
     pred = np.asarray(best.get("pred", []), dtype=float)
@@ -808,17 +807,14 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
     avg_fc = float(np.mean(pred))
     min_fc, max_fc = float(np.min(pred)), float(np.max(pred))
     change_avg = 100.0 * (avg_fc/last_price - 1.0) if last_price else np.nan
-    # pente simple (régression linéaire sur la prévision)
     x = np.arange(1, len(pred)+1)
     try:
-        slope = float(np.polyfit(x, pred, 1)[0])  # FCFA par pas
+        slope = float(np.polyfit(x, pred, 1)[0])
     except Exception:
         slope = 0.0
     direction = "hausse" if change_avg > 1 else ("baisse" if change_avg < -1 else "stabilité")
-    # Momentum & volatilité récents (20 derniers retours)
     mom = recent_returns.mean() * 100 if len(recent_returns) else np.nan
     vol = recent_returns.std() * sqrt(252) * 100 if len(recent_returns) else np.nan
-    # Confiance basique selon sMAPE
     if np.isnan(score):
         conf = "faible"
     elif score <= 8:
@@ -827,7 +823,6 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
         conf = "moyenne"
     else:
         conf = "faible"
-    # Verdict
     if change_avg >= 3 and mom >= 0:
         verdict = "Haussier"
     elif change_avg <= -3 and mom <= 0:
@@ -851,6 +846,14 @@ def main():
     centered_title("Dashboard Marchés Boursiers – BRVM",
                    "Analyse technique & fondamentale | Backtests | Prédiction auto (modèles rapides)")
 
+    # --- État global partagé (dates & fréquence) ---
+    if 'global_date_start' not in st.session_state:
+        st.session_state.global_date_start = None
+    if 'global_date_end' not in st.session_state:
+        st.session_state.global_date_end = None
+    if 'global_freq_code' not in st.session_state:
+        st.session_state.global_freq_code = 'D'
+
     tab_main, tab_forecast = st.tabs(["Tableau de bord", "Prédiction"])
 
     # ===================== TAB PRINCIPAL =====================
@@ -871,12 +874,26 @@ def main():
 
             shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
 
-            st.header("Période & Fréquence")
-            freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0)
+            st.header("Période & Fréquence (GLOBAL)")
+            freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0,
+                                help="S'applique à tous les onglets.")
             freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
+            st.session_state.global_freq_code = freq_code
+
             dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
-            dr = st.date_input("Fenêtre d'analyse", value=(dmin, dmax), min_value=dmin, max_value=dmax)
-            start_date, end_date = (pd.to_datetime(dr[0]), pd.to_datetime(dr[1])) if isinstance(dr, tuple) else (pd.to_datetime(dmin), pd.to_datetime(dmax))
+            # Si première fois, initialise; sinon affiche la valeur précédente
+            default_range = (
+                st.session_state.global_date_start.date() if st.session_state.global_date_start else dmin,
+                st.session_state.global_date_end.date()   if st.session_state.global_date_end else dmax
+            )
+            dr = st.date_input("Fenêtre d'analyse (globale)", value=default_range, min_value=dmin, max_value=dmax,
+                               help="Cette plage est utilisée dans tous les onglets (Tableau de bord & Prédiction).")
+            if isinstance(dr, tuple):
+                st.session_state.global_date_start = pd.to_datetime(dr[0])
+                st.session_state.global_date_end   = pd.to_datetime(dr[1])
+            else:
+                st.session_state.global_date_start = pd.to_datetime(dmin)
+                st.session_state.global_date_end   = pd.to_datetime(dmax)
 
             st.header("Indicateurs techniques")
             indicators = st.multiselect("Sélection", ['MM', 'EMA', 'Bollinger', 'RSI', 'MACD'], default=['MM','RSI'])
@@ -939,10 +956,12 @@ def main():
             manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
 
         # ===== TRAITEMENTS (filtre global) =====
-        df_global = df_original[(df_original['Date'] >= pd.to_datetime(start_date)) & (df_original['Date'] <= pd.to_datetime(end_date))].copy()
+        start_date = st.session_state.global_date_start
+        end_date   = st.session_state.global_date_end
+        df_global = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
 
-        df = add_indicators(resample_ohlcv(df_global, freq_code=freq_code), params)
-        metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
+        df = add_indicators(resample_ohlcv(df_global, freq_code=st.session_state.global_freq_code), params)
+        metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=st.session_state.global_freq_code)
 
         ann_df = compute_market_fundamentals_from_original(df_global, shares)
 
@@ -971,7 +990,7 @@ def main():
 
         # ===== MÉTRIQUES =====
         st.subheader("Métriques principales")
-        badge = {"D":"Jour","W":"Semaine","M":"Mois"}[freq_code]
+        badge = {"D":"Jour","W":"Semaine","M":"Mois"}[st.session_state.global_freq_code]
         m1,m2,m3,m4,m5,m6 = st.columns(6)
         m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
         m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
@@ -1054,6 +1073,8 @@ def main():
     # ===================== TAB PRÉDICTION =====================
     with tab_forecast:
         st.markdown("### Paramètres de prédiction")
+
+        # Assure les données en mémoire (même logique que l'onglet principal)
         if 'df_original' not in locals():
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
@@ -1062,13 +1083,18 @@ def main():
                 st.stop()
 
         dmin_f, dmax_f = df_original['Date'].min().date(), df_original['Date'].max().date()
-        colA, colB = st.columns(2)
-        with colA:
-            dr_f = st.date_input("Fenêtre pour apprentissage du modèle", value=(dmin_f, dmax_f), min_value=dmin_f, max_value=dmax_f, key="pred_dates")
-        with colB:
-            horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=180, value=30, step=1)
 
-        start_f, end_f = (pd.to_datetime(dr_f[0]), pd.to_datetime(dr_f[1])) if isinstance(dr_f, tuple) else (pd.to_datetime(dmin_f), pd.to_datetime(dmax_f))
+        # Utiliser par défaut la fenêtre GLOBALE ; possibilité de la désactiver
+        use_global_window = st.checkbox("Utiliser la même fenêtre que le Tableau de bord (global)", value=True)
+        if use_global_window:
+            start_f = st.session_state.global_date_start
+            end_f   = st.session_state.global_date_end
+        else:
+            dr_f = st.date_input("Fenêtre spécifique à la prédiction", value=(dmin_f, dmax_f), min_value=dmin_f, max_value=dmax_f, key="pred_dates")
+            start_f, end_f = (pd.to_datetime(dr_f[0]), pd.to_datetime(dr_f[1])) if isinstance(dr_f, tuple) else (pd.to_datetime(dmin_f), pd.to_datetime(dmax_f))
+
+        horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=180, value=30, step=1)
+
         df_pred = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
         df_pred = df_pred.sort_values('Date').reset_index(drop=True)
 
@@ -1088,7 +1114,6 @@ def main():
             st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
             last_price = float(s.iloc[-1])
-            # momentum & volatilité récents (20 derniers jours)
             recent_returns = s.pct_change().dropna().tail(20)
             st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
 
