@@ -569,6 +569,37 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
         out['PER'] = (out['last_price'] / out['EPS'].replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).round(2)
     return out
 
+# --------- Graphique Dividend Yield & PER (corrigé) ----------
+def plot_dividend_and_pe(ann_df: pd.DataFrame) -> Optional[go.Figure]:
+    if ann_df is None or ann_df.empty:
+        return None
+    year_col = None
+    for c in ['Annee', 'Année', 'Year', 'year']:
+        if c in ann_df.columns:
+            year_col = c; break
+    if year_col is None:
+        return None
+    x = ann_df[year_col]
+    has_yield = 'Dividend_Yield_%' in ann_df.columns and ann_df['Dividend_Yield_%'].notna().any()
+    has_per   = 'PER' in ann_df.columns and ann_df['PER'].notna().any()
+    if not has_yield and not has_per:
+        return None
+    fig = make_subplots(rows=1, cols=2,
+                        subplot_titles=['Dividend Yield (%)', 'PER (x)'],
+                        shared_xaxes=False, vertical_spacing=0.06, horizontal_spacing=0.08)
+    if has_yield:
+        fig.add_trace(go.Scatter(x=x, y=ann_df['Dividend_Yield_%'], mode='lines+markers', name='Dividend Yield (%)', line=dict(width=2)), row=1, col=1)
+        fig.update_yaxes(title_text="%", row=1, col=1)
+    if has_per:
+        fig.add_trace(go.Scatter(x=x, y=ann_df['PER'], mode='lines+markers', name='PER (x)', line=dict(width=2)), row=1, col=2)
+        fig.update_yaxes(title_text="x", row=1, col=2)
+    fig.update_xaxes(title_text="Année", row=1, col=1)
+    fig.update_xaxes(title_text="Année", row=1, col=2)
+    fig.update_layout(height=380, showlegend=False, margin=dict(t=30, b=18, l=24, r=10),
+                      template='plotly_dark', paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                      font=dict(color="#e8e6e3", size=13))
+    return fig
+
 # --------------------------- Formats & modèles ---------------------------
 def format_pct_scientific(x: float) -> str:
     try:
@@ -713,39 +744,57 @@ def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2)
 
     return {"name": best_name, "pred": np.asarray(pred, dtype=float), "bands": bands, "score": float(best_score), "engine": best_tag[0]}
 
-def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon: int, bands=None,
-                    title: str = "Prévision", tick_years: bool=True) -> go.Figure:
-    """Graphique prévision + zone ombrée forecast + ticks annuels."""
+# ---- Figure prévision : superpose horizon courant + projection 5 ans ----
+def forecast_figure_dual(history: pd.DataFrame,
+                         pred_main: np.ndarray, horizon_main: int, bands_main=None,
+                         pred_5y: Optional[np.ndarray]=None, horizon_5y: Optional[int]=None,
+                         title: str = "Prévision (horizon & projection 5 ans)") -> go.Figure:
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=history['Date'], y=history[y_col], mode='lines', name='Historique', line=dict(width=2.6)))
+    # Historique
+    fig.add_trace(go.Scatter(x=history['Date'], y=history['Close'], mode='lines',
+                             name='Historique', line=dict(width=2.6)))
 
     last_date = pd.to_datetime(history['Date'].iloc[-1])
     inferred = pd.infer_freq(history['Date'])
     freq = inferred if inferred is not None else 'D'
-    future_idx = pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
 
-    # bandes
-    if bands is not None:
-        lo, hi = bands
-        if len(lo) == horizon and len(hi) == horizon:
-            fig.add_trace(go.Scatter(x=future_idx, y=hi, line=dict(width=0), showlegend=False))
-            fig.add_trace(go.Scatter(x=future_idx, y=lo, fill='tonexty', name='Intervalle', opacity=0.18, line=dict(width=0)))
+    # Index futurs
+    future_idx_main = pd.date_range(last_date, periods=horizon_main+1, freq=freq)[1:]
 
-    # prévision
-    fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
+    # Bandes (horizon courant)
+    if bands_main is not None:
+        lo, hi = bands_main
+        if len(lo) == horizon_main and len(hi) == horizon_main:
+            fig.add_trace(go.Scatter(x=future_idx_main, y=hi, line=dict(width=0), showlegend=False))
+            fig.add_trace(go.Scatter(x=future_idx_main, y=lo, fill='tonexty', name='Intervalle (horizon)',
+                                     opacity=0.18, line=dict(width=0)))
 
-    # zone forecast + trait
-    fig.add_vrect(x0=last_date, x1=future_idx[-1], fillcolor="#5b8def", opacity=0.08, line_width=0)
+    # Courbe horizon courant
+    fig.add_trace(go.Scatter(x=future_idx_main, y=pred_main, mode='lines+markers',
+                             name='Prévision (horizon courant)', line=dict(width=2.8)))
+
+    # Projection 5 ans (seulement la courbe pour lisibilité)
+    if (pred_5y is not None) and (horizon_5y is not None):
+        future_idx_5y = pd.date_range(last_date, periods=horizon_5y+1, freq=freq)[1:]
+        fig.add_trace(go.Scatter(x=future_idx_5y, y=pred_5y, mode='lines',
+                                 name='Projection 5 ans', line=dict(width=2.4, dash='dash')))
+
+        # zone forecast jusqu'à la fin des 5 ans
+        x1 = future_idx_5y[-1]
+    else:
+        x1 = future_idx_main[-1]
+
+    # zone future + trait de coupure
+    fig.add_vrect(x0=last_date, x1=x1, fillcolor="#5b8def", opacity=0.08, line_width=0)
     fig.add_shape(type="line", x0=last_date, x1=last_date, y0=0, y1=1, xref="x", yref="paper",
                   line=dict(color="#5b8def", width=1, dash="dot"))
 
-    # ticks annuels
-    if tick_years:
-        fig.update_xaxes(dtick="M12", tickformat="%Y")
+    # Ticks annuels
+    fig.update_xaxes(dtick="M12", tickformat="%Y")
 
-    fig.update_layout(title=title, height=460,
-                      margin=dict(t=52,b=80,l=24,r=12),
-                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
+    fig.update_layout(title=title, height=480,
+                      margin=dict(t=52,b=86,l=24,r=12),
+                      legend=dict(orientation='h', yanchor='top', y=-0.22, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
@@ -980,7 +1029,7 @@ def main():
                 bt_df, bt_stats, _ = backtest_rsi_macd(
                     df, rsi_window=int(rsi_window),
                     rsi_buy=float(bt_rsi_buy), rsi_confirm=float(bt_rsi_confirm), rsi_sell=float(bt_rsi_sell),
-                    macd_fast=int(macd_fast), macd_slow=int(macd_slow), macd_signal=9,
+                    macd_fast=int(bt_macd_fast), macd_slow=int(bt_macd_slow), macd_signal=int(bt_macd_signal),
                     fee_bps=float(bt_fee)
                 )
             else:
@@ -1043,38 +1092,28 @@ def main():
         with st.spinner("Sélection du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
             best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
 
+        # Courbe 5 ans (même historique)
+        horizon_5y = 5 * steps_per_year
+        with st.spinner("Calcul de la projection 5 ans…"):
+            best5 = choose_best_model(s, horizon=int(horizon_5y), valid_ratio=0.2)
+
         hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
-        fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
-                                 bands=best.get("bands"),
-                                 title=f"Prévision (meilleur modèle : {best['name']})")
-        st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
-
-        # ---- Afficher aussi la projection 5 ans en plus ----
-        show_5y = st.checkbox("Afficher aussi la projection 5 ans (en plus)", value=True)
-        if show_5y:
-            horizon_5y = 5 * steps_per_year
-            with st.spinner("Calcul de la projection 5 ans…"):
-                best5 = choose_best_model(s, horizon=int(horizon_5y), valid_ratio=0.2)
-            fc5_fig = forecast_figure(hist_df, 'Close', np.asarray(best5['pred'], dtype=float), int(horizon_5y),
-                                      bands=best5.get("bands"),
-                                      title=f"Prévision long terme — 5 ans (meilleur modèle : {best5['name']})")
-            st.plotly_chart(fc5_fig, use_container_width=True, config={"displaylogo": False})
-
-        # résumé
-        last_price = float(s.iloc[-1])
-        recent_returns = s.pct_change().dropna().tail(20)
-        st.markdown(
-            f"**Résumé**: {best['name']} • sMAPE ≈ {best['score']:.2f}% • "
-            f"Direction moyenne sur {int(horizon)} pas."
+        fc_dual_fig = forecast_figure_dual(
+            hist_df, np.asarray(best['pred'], dtype=float), int(horizon), bands_main=best.get("bands"),
+            pred_5y=np.asarray(best5['pred'], dtype=float), horizon_5y=int(horizon_5y),
+            title=f"Prévision (meilleur modèle : {best['name']}) + Projection 5 ans ({best5['name']})"
         )
+        st.plotly_chart(fc_dual_fig, use_container_width=True, config={"displaylogo": False})
 
-        # export
+        # résumé + export horizon courant
+        st.markdown(f"**Résumé**: {best['name']} • sMAPE ≈ {best['score']:.2f}% • Horizon: {int(horizon)} pas.  \n"
+                    f"**Projection 5 ans**: {best5['name']} • sMAPE ≈ {best5['score']:.2f}% • Pas ≈ {int(horizon_5y)}.")
         last_date = hist_df['Date'].iloc[-1]
         freq_for_range = "B" if freq_code in ("B","D") else ("W" if freq_code=="W" else "M")
         future_idx = pd.date_range(last_date, periods=int(horizon)+1, freq=freq_for_range)[1:]
         out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
-        st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
-                           file_name="previsions_auto.csv", mime="text/csv")
+        st.download_button("Télécharger les prévisions (CSV - horizon courant)", out_fc.to_csv(index=False).encode('utf-8'),
+                           file_name="previsions_auto_horizon.csv", mime="text/csv")
 
         if not ARCH_AVAILABLE:
             st.caption("💡 Pour activer **GARCH**, installez le paquet `arch` (sinon il sera ignoré).")
