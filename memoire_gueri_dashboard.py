@@ -1,4 +1,4 @@
-# memoire_gueri_dashboard.py — Thème sombre + Filtres globaux + Fondamentaux + Backtests + Auto-forecast (résumé investisseur)
+# memoire_gueri_dashboard.py — Thème sombre + Filtres globaux + Fondamentaux + Backtests + Auto-forecast + Guide
 # ------------------------------------------------------------------------------------------------------------
 import streamlit as st
 import pandas as pd
@@ -35,10 +35,11 @@ DEFAULT_DPS_PATH   = "dps_exemple.csv"
 DEFAULT_EPS_PATH   = "eps_exemple.csv"
 DEFAULT_NET_PATH   = "net_income_exemple.csv"
 
-# ===== CSS sombre compact + Titre lisible =====
+# ===== CSS sombre compact + Titre lisible (abaissé) =====
 BASE_CSS = """
 <style>
-.block-container {padding-top: 0.7rem; padding-bottom: 0.7rem; max-width: 1600px;}
+/* Descendre un peu le contenu pour mieux respirer */
+.block-container {padding-top: 1.2rem; padding-bottom: 0.8rem; max-width: 1600px;}
 section[data-testid="stSidebar"] .block-container {padding-top: 0.5rem; padding-bottom: 0.5rem;}
 div[data-testid="stVerticalBlock"] {gap: 0.6rem;}
 .element-container:has(.stPlotlyChart) {margin-bottom: 0.4rem;}
@@ -50,18 +51,18 @@ h2, h3, h4 { margin-bottom: 0.25rem; }
 hr { margin: 0.5rem 0 0.6rem 0; }
 .small-note { font-size: 0.9rem; color: #c9c7c4; }
 
-/* Titre centré — lisibilité renforcée (anti-glitches) */
+/* Titre centré — lisibilité + position abaissée */
 .app-title {
   text-align: center;
   font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
   font-weight: 800;
-  font-size: clamp(24px, 2.6vw, 34px);
-  line-height: 1.15;
-  letter-spacing: 0;             /* pas d'espacement artificiel */
-  margin: 0.3rem 0 0.5rem 0;
+  font-size: clamp(22px, 2.2vw, 30px);   /* un peu plus petit */
+  line-height: 1.12;
+  letter-spacing: 0;
+  margin: 0.6rem 0 0.4rem 0;            /* ↑ marge top pour l'abaisser visuellement */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-variant-ligatures: none;  /* coupe les ligatures */
+  font-variant-ligatures: none;         /* coupe les ligatures (évite les glyphes bizarres) */
   font-feature-settings: "liga" 0, "clig" 0, "kern" 1;
   text-rendering: optimizeLegibility;
   word-break: keep-all;
@@ -69,10 +70,10 @@ hr { margin: 0.5rem 0 0.6rem 0; }
 }
 .app-subtitle {
   text-align: center;
-  margin-top: -0.1rem;
-  margin-bottom: 0.7rem;
+  margin-top: -0.05rem;
+  margin-bottom: 1.0rem;                /* ↑ espace sous le sous-titre pour aérer */
   opacity: 0.9;
-  font-size: clamp(12px, 1.15vw, 16px);
+  font-size: clamp(12px, 1.1vw, 15px);
 }
 
 /* Sombre */
@@ -526,7 +527,7 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
             other = [c for c in dps_df.columns if c != 'Annee'][0]; dps_df = dps_df.rename(columns={other:'DPS'})
         else: dps_df = None
         if dps_df is not None:
-            out = out.merge(dps_df[['Annee','DPS']], on='Annee', how='left')
+            out = out.merge(dps_df[['Annee','DPS']], on('Annee'), how='left')  # noqa
     # EPS / Net income
     if eps_or_net_df is not None and not eps_or_net_df.empty:
         eps_col = None; net_col = None
@@ -809,7 +810,7 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
     change_avg = 100.0 * (avg_fc/last_price - 1.0) if last_price else np.nan
     x = np.arange(1, len(pred)+1)
     try:
-        slope = float(np.polyfit(x, pred, 1)[0])
+        slope = float(np.polyfit(x, pred, 1)[0])  # FCFA par pas
     except Exception:
         slope = 0.0
     direction = "hausse" if change_avg > 1 else ("baisse" if change_avg < -1 else "stabilité")
@@ -840,6 +841,63 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
     ]
     return "\n".join(lines)
 
+# --------------------------- GUIDE (nouvel onglet) ---------------------------
+def guide_tab():
+    st.markdown("## Guide & Méthodologie")
+    st.info("Les **filtres globaux** de la barre latérale (fréquence et fenêtre de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
+
+    with st.expander("📈 Indicateurs techniques (sur le graphique principal)", expanded=True):
+        st.markdown("""
+- **MM (SMA)** : moyenne arithmétique des *Close* sur *n* périodes.  
+  • **Signal courant** : croisement **MM rapide > MM lente** → biais haussier ; l’inverse → biais baissier.  
+- **EMA** : moyenne exponentielle (réagit plus vite).  
+- **Bandes de Bollinger** (20, ±2σ) : zone 95% autour de la moyenne mobile.  
+  • Clôture proche de la bande haute → **surachat relatif** ; proche bande basse → **survente relative**.  
+- **RSI (14)** : 0–100 (Wilder).  
+  • >70 : surachat ; <30 : survente ; **50** = équilibre/momentum neutre.  
+- **MACD (12/26/9)** : différence de deux EMA + ligne “signal” + histogramme.  
+  • **Croisement MACD↑Signal** : reprise haussière ; **MACD↓Signal** : essoufflement.
+        """)
+
+    with st.expander("📊 Métriques de performance (cartes en haut)", expanded=False):
+        st.markdown("""
+- **Rendement total** : variation % entre le premier et le dernier *Close* de la fenêtre.  
+- **Rendement annualisé** : conversion du rendement moyen par période en rythme annuel (selon la fréquence).  
+- **Volatilité annualisée** : σ des rendements × √(périodes/an).  
+- **Sharpe** (sans risque paramétrable) : (rendement excédentaire / volatilité) × √(périodes/an).  
+- **Max Drawdown** : pire baisse pic→creux cumulée (%).  
+- **CAGR** (dans la synthèse fondamentale) : taux composé annuel entre le 1er et le dernier prix.
+        """)
+
+    with st.expander("🧪 Backtests intégrés", expanded=False):
+        st.markdown("""
+- **SMA Crossover** : achat quand **MM rapide > MM lente**, vente sur croisement inverse.  
+  • Avantage : simple, suit la tendance. • Limite : faux signaux en range.  
+- **RSI + MACD** : préparation par **RSI < seuil bas**, puis **achat** si **MACD croise à la hausse** ; **vente** si **RSI > seuil haut** ou **MACD croise à la baisse**.  
+  • Avantage : combine momentum (RSI) et changement de régime (MACD).  
+- **Mixte (SMA + RSI)** : on **n’achète** que si tendance haussière (MM rapide>lente) **et** RSI > seuil d’entrée ; sortie si l’un casse.  
+  • Paramètre **Frais (bps)** inclus dans les calculs d’équity.
+        """)
+
+    with st.expander("🤖 Modèles de prédiction automatiques", expanded=False):
+        st.markdown("""
+- **Naïf** : répète le dernier prix.  
+- **Drift** : prolonge la pente moyenne historique.  
+- **SMA (prévision)** : projette la moyenne récente.  
+- **Holt-Winters** : tendance lissée (additive, amortie).  
+- **ARIMA (petit grid)** : capture autocorrélations et différenciation.  
+- **Sélection** : meilleur **sMAPE** sur une validation (20% fin de série).  
+- **Résumé investisseur** : direction moyenne, fourchette prévue, pente, momentum récent, vol. annualisée et **verdict** (Haussier/Baissier/Neutre).
+        """)
+
+    with st.expander("ℹ️ Conseils d’interprétation rapide", expanded=False):
+        st.markdown("""
+- **Confluence** > un seul signal : MM (tendance) + RSI/MACD (momentum) + Bollinger (emplacement).  
+- **Risque** : surveiller **Max DD** et **volatilité** ; Sharpe > 1 est déjà correct.  
+- **Backtest ≠ garantie** : valider sur plusieurs fenêtres et fréquences.  
+- **Prévisions** : préférer une **fourchette** à un point ; regarder la **confiance (sMAPE)**.
+        """)
+
 # --------------------------- APP ---------------------------
 def main():
     apply_dark_theme()
@@ -854,7 +912,8 @@ def main():
     if 'global_freq_code' not in st.session_state:
         st.session_state.global_freq_code = 'D'
 
-    tab_main, tab_forecast = st.tabs(["Tableau de bord", "Prédiction"])
+    # ---------------- TABS (ajout 'Guide & Méthodo') ----------------
+    tab_main, tab_forecast, tab_guide = st.tabs(["Tableau de bord", "Prédiction", "Guide & Méthodo"])
 
     # ===================== TAB PRINCIPAL =====================
     with tab_main:
@@ -881,7 +940,6 @@ def main():
             st.session_state.global_freq_code = freq_code
 
             dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
-            # Si première fois, initialise; sinon affiche la valeur précédente
             default_range = (
                 st.session_state.global_date_start.date() if st.session_state.global_date_start else dmin,
                 st.session_state.global_date_end.date()   if st.session_state.global_date_end else dmax
@@ -909,6 +967,7 @@ def main():
                     rsi_window = st.slider("RSI", 5, 30, 14, 1)
                     macd_fast = st.slider("MACD Rapide", 5, 20, 12, 1)
                     macd_slow = st.slider("MACD Lent", 20, 40, 26, 1)
+
             params = {
                 'show_sma':'MM' in indicators, 'sma1':sma1, 'sma2':sma2,
                 'show_ema':'EMA' in indicators, 'ema1':ema1,
@@ -963,6 +1022,7 @@ def main():
         df = add_indicators(resample_ohlcv(df_global, freq_code=st.session_state.global_freq_code), params)
         metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=st.session_state.global_freq_code)
 
+        # ===== FONDAMENTAUX =====
         ann_df = compute_market_fundamentals_from_original(df_global, shares)
 
         if dps_uploader is not None:
@@ -1073,8 +1133,6 @@ def main():
     # ===================== TAB PRÉDICTION =====================
     with tab_forecast:
         st.markdown("### Paramètres de prédiction")
-
-        # Assure les données en mémoire (même logique que l'onglet principal)
         if 'df_original' not in locals():
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
@@ -1114,6 +1172,7 @@ def main():
             st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
             last_price = float(s.iloc[-1])
+            # momentum & volatilité récents (20 derniers jours)
             recent_returns = s.pct_change().dropna().tail(20)
             st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
 
@@ -1122,6 +1181,10 @@ def main():
             out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
             st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
                                file_name="previsions_auto.csv", mime="text/csv")
+
+    # ===================== TAB GUIDE =====================
+    with tab_guide:
+        guide_tab()
 
 
 if __name__ == "__main__":
