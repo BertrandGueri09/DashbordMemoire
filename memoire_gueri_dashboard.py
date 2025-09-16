@@ -284,7 +284,7 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
         fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.55), row=current_row, col=1)
 
     fig.update_layout(height=640, showlegend=True,
-                      legend=dict(orientation='h', yanchor='top', y=-0.12, xanchor='left', x=0),
+                      legend=dict(orientation='h', yanchor='top', y=-0.14, xanchor='left', x=0),  # légèrement relevé
                       margin=dict(t=30, b=60, l=28, r=22))
     set_fig_template(fig)
     return fig
@@ -871,8 +871,8 @@ def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon
     fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
 
     fig.update_layout(title=title, height=460,
-                      margin=dict(t=52,b=80,l=24,r=12),
-                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
+                      margin=dict(t=44,b=84,l=24,r=12),
+                      legend=dict(orientation='h', yanchor='top', y=-0.16, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
@@ -1213,17 +1213,17 @@ def main():
             st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
             st.stop()
 
-        # Horizon : entrée libre + bouton 5 ans auto
+        # Horizon : 5 ans AUTO (désactivable)
         freq_code, steps_per_year = _infer_freq_and_steps_per_year(s.index)
-        colH1, colH2 = st.columns([2,1])
-        with colH1:
+        auto_5y = st.checkbox("Prévision automatique sur 5 ans", value=True, help="Décochez pour saisir un horizon manuel.")
+        if auto_5y:
+            horizon = 5 * steps_per_year
+            st.info(f"Horizon fixé automatiquement à ~5 ans ⇒ **{horizon} pas** (fréquence détectée : **{freq_code}**, ~{steps_per_year} pas/an).")
+        else:
             horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=5000,
                                       value=int(30), step=1,
                                       help="Nombre de pas (jours ouvrés/semaines/mois) à prévoir.")
-        with colH2:
-            if st.button(f"Prévoir 5 ans (≈ {5*steps_per_year} pas)"):
-                horizon = 5 * steps_per_year
-        st.caption(f"Fréquence détectée : **{freq_code}** • Pas/an ≈ **{steps_per_year}** • Horizon actuel : **{horizon}**")
+            st.caption(f"Fréquence détectée : **{freq_code}** • Pas/an ≈ **{steps_per_year}** • Horizon actuel : **{horizon}**")
 
         with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
             best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
@@ -1231,7 +1231,7 @@ def main():
         hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
         fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
                                  bands=best.get("bands"),
-                                 title=f"Prévision (meilleur modèle : {best['name']})")
+                                 title=f"Prévision {'5 ans' if auto_5y else ''} (meilleur modèle : {best['name']})")
         st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
         last_price = float(s.iloc[-1])
