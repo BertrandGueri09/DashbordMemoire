@@ -1,4 +1,4 @@
-# memoire_gueri_dashboard.py — Thème sombre + Filtres globaux + Fondamentaux + Backtests + Auto-forecast
+# memoire_gueri_dashboard.py — Thème sombre + Filtres globaux + Fondamentaux + Backtests + Auto-forecast (résumé investisseur)
 # ------------------------------------------------------------------------------------------------------------
 
 import streamlit as st
@@ -12,7 +12,6 @@ from typing import Union, Dict, Tuple, List, Optional
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
 from math import sqrt
 
 # Statsmodels pour prévisions
@@ -37,7 +36,7 @@ DEFAULT_DPS_PATH   = "dps_exemple.csv"
 DEFAULT_EPS_PATH   = "eps_exemple.csv"
 DEFAULT_NET_PATH   = "net_income_exemple.csv"
 
-# ===== CSS sombre compact =====
+# ===== CSS sombre compact + Titre lisible =====
 BASE_CSS = """
 <style>
 .block-container {padding-top: 0.7rem; padding-bottom: 0.7rem; max-width: 1600px;}
@@ -52,26 +51,28 @@ h2, h3, h4 { margin-bottom: 0.25rem; }
 hr { margin: 0.5rem 0 0.6rem 0; }
 .small-note { font-size: 0.9rem; color: #c9c7c4; }
 
-/* Titre centré */
+/* Titre centré — taille contrôlée et anti-ligatures */
 .app-title {
   text-align: center;
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
-  font-weight: 800;
-  font-size: clamp(26px, 3.2vw, 36px);
+  font-weight: 700;
+  font-size: clamp(22px, 2.4vw, 32px); /* plus raisonnable */
   line-height: 1.15;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.1px;
   margin: 0.2rem 0 0.4rem 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "clig" 0, "kern" 1;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .app-subtitle {
   text-align: center;
   margin-top: -0.2rem;
   margin-bottom: 0.6rem;
   opacity: 0.85;
-  font-size: 0.95rem;
+  font-size: clamp(12px, 1.1vw, 15px);
 }
 
 /* Sombre */
@@ -676,23 +677,7 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
     return out
 
 # --------------------------- OUTILS PRÉSENTATION NOMBRES ---------------------------
-def format_compact(x: float) -> str:
-    """Affiche 1234567 -> 1.23M etc., sinon 2 décimales."""
-    try:
-        x = float(x)
-    except Exception:
-        return str(x)
-    absx = abs(x)
-    if absx >= 1_000_000_000:
-        return f"{x/1_000_000_000:.2f}B"
-    if absx >= 1_000_000:
-        return f"{x/1_000_000:.2f}M"
-    if absx >= 1_000:
-        return f"{x/1_000:.2f}K"
-    return f"{x:.2f}"
-
 def format_pct_compact(x: float) -> str:
-    """Format pour % avec 2 décimales, sans exposants."""
     try:
         return f"{float(x):.2f}%"
     except Exception:
@@ -716,7 +701,6 @@ def model_naive(train: pd.Series, horizon: int) -> np.ndarray:
     return np.full(horizon, last)
 
 def model_drift(train: pd.Series, horizon: int) -> np.ndarray:
-    # Drift: extrapolation linéaire entre premier et dernier point
     y0, yN = float(train.iloc[0]), float(train.iloc[-1])
     n = len(train) - 1
     g = 0 if n <= 0 else (yN - y0) / n
@@ -728,7 +712,6 @@ def model_sma(train: pd.Series, horizon: int, window: int = 10) -> np.ndarray:
 
 def fit_holt_winters(train: pd.Series, horizon: int) -> np.ndarray:
     try:
-        # Série daily/sans saisonnalité forte -> additive, trend additif, damped
         hw = ExponentialSmoothing(train, trend="add", seasonal=None, damped_trend=True, initialization_method="estimated")
         model = hw.fit(optimized=True)
         fc = model.forecast(horizon)
@@ -756,53 +739,42 @@ def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int
 def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2) -> Dict:
     series = series.dropna()
     if len(series) < 20:
-        # Peu de points → simple
         y_hat = model_naive(series, horizon)
         return {"name":"Naïf", "pred":y_hat, "order":None, "metric":"sMAPE", "score":np.nan}
     train, valid = train_valid_split(series, valid_ratio)
     h = min(horizon, len(valid))
-    # Candidats rapides
     candidates = []
 
-    # Naïf
     yhat = model_naive(train, h); sm = sMAPE(valid.iloc[:h].values, yhat)
     candidates.append(("Naïf", yhat, None, sm))
 
-    # Drift
     yhat = model_drift(train, h); sm = sMAPE(valid.iloc[:h].values, yhat)
     candidates.append(("Drift", yhat, None, sm))
 
-    # SMA (fenêtres petites pour vitesse)
     for w in [5, 10, 20]:
         yhat = model_sma(train, h, window=w); sm = sMAPE(valid.iloc[:h].values, yhat)
         candidates.append((f"SMA({w})", yhat, None, sm))
 
-    # Holt-Winters
     yhat = fit_holt_winters(train, h); sm = sMAPE(valid.iloc[:h].values, yhat)
     candidates.append(("Holt-Winters", yhat, None, sm))
 
-    # ARIMA petite grille
     grid = [(0,1,0),(1,1,0),(0,1,1),(1,1,1)]
     yhat, order = fit_arima_small(train, h, grid); sm = sMAPE(valid.iloc[:h].values, yhat)
     candidates.append((f"ARIMA{order if order else ''}", yhat, order, sm))
 
-    # Choix par plus petite sMAPE
     best = min(candidates, key=lambda t: t[3] if np.isfinite(t[3]) else np.inf)
     best_name, _, best_order, best_score = best
 
-    # Refit sur TOUTE la série pour horizon complet
     if best_name.startswith("Naïf"):
         final_pred = model_naive(series, horizon)
     elif best_name.startswith("Drift"):
         final_pred = model_drift(series, horizon)
     elif best_name.startswith("SMA"):
-        # récupérer fenêtre
         w = int(best_name.split("(")[1].split(")")[0])
         final_pred = model_sma(series, horizon, window=w)
     elif best_name.startswith("Holt"):
         final_pred = fit_holt_winters(series, horizon)
     else:
-        # ARIMA
         if best_order is None:
             final_pred = model_naive(series, horizon)
         else:
@@ -817,44 +789,72 @@ def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2)
 def plot_forecast(history: pd.DataFrame, y_col: str, yhat: np.ndarray, horizon: int, title: str = "Prévision") -> go.Figure:
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=history['Date'], y=history[y_col], mode='lines', name='Historique'))
-    # timeline future
     last_date = pd.to_datetime(history['Date'].iloc[-1])
-    # heuristique pour fréquence: si pas régulière -> jours
     inferred = pd.infer_freq(history['Date'])
-    if inferred is None:
-        freq = 'D'
-    else:
-        freq = inferred
+    freq = inferred if inferred is not None else 'D'
     future_idx = pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
     fig.add_trace(go.Scatter(x=future_idx, y=yhat, mode='lines+markers', name='Prévision'))
     fig.update_layout(title=title, height=420, margin=dict(t=40,b=20,l=20,r=10))
     set_fig_template(fig)
     return fig
 
-def forecast_summary(best: Dict, horizon: int, last_price: float) -> str:
+def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, recent_returns: pd.Series) -> str:
+    """Résumé orienté décision : direction, pente, bande prévue, momentum & risque."""
     name = best.get("name","?")
     score = best.get("score", np.nan)
-    lines = [f"**Modèle retenu :** {name}  |  **Critère:** sMAPE (validation) ≈ {score:.2f}%"]
     pred = np.asarray(best.get("pred", []), dtype=float)
-    if pred.size > 0:
-        avg_fc = float(np.mean(pred))
-        change = 100.0 * (avg_fc/last_price - 1.0) if last_price else np.nan
-        lines.append(f"**Prix moyen prévu (sur {horizon} pas)** : {avg_fc:,.2f} FCFA (≈ {change:.2f} % vs. dernier prix)")
-        lines.append("**Note :** sélections rapides pour la production (petite grille ARIMA, HW additif damped, baselines). À affiner si besoin.")
+    if pred.size == 0:
+        return f"**Modèle retenu :** {name}. Aucune prévision exploitable."
+    avg_fc = float(np.mean(pred))
+    min_fc, max_fc = float(np.min(pred)), float(np.max(pred))
+    change_avg = 100.0 * (avg_fc/last_price - 1.0) if last_price else np.nan
+    # pente simple (régression linéaire sur la prévision)
+    x = np.arange(1, len(pred)+1)
+    try:
+        slope = float(np.polyfit(x, pred, 1)[0])  # FCFA par pas
+    except Exception:
+        slope = 0.0
+    direction = "hausse" if change_avg > 1 else ("baisse" if change_avg < -1 else "stabilité")
+    # Momentum & volatilité récents (20 derniers retours)
+    mom = recent_returns.mean() * 100 if len(recent_returns) else np.nan
+    vol = recent_returns.std() * sqrt(252) * 100 if len(recent_returns) else np.nan
+    # Confiance basique selon sMAPE
+    if np.isnan(score):
+        conf = "faible"
+    elif score <= 8:
+        conf = "élevée"
+    elif score <= 15:
+        conf = "moyenne"
+    else:
+        conf = "faible"
+    # Verdict
+    if change_avg >= 3 and mom >= 0:
+        verdict = "Haussier"
+    elif change_avg <= -3 and mom <= 0:
+        verdict = "Baissier"
+    else:
+        verdict = "Neutre"
+    lines = [
+        f"**Modèle retenu :** {name}  |  **Erreur (sMAPE validation)** ≈ {score:.2f} %  → **Confiance {conf}**",
+        f"- **Direction attendue (sur {horizon} pas)** : {direction} (∆ moyen ≈ {change_avg:.2f} % vs. dernier prix)",
+        f"- **Fourchette prévue** : {min_fc:,.2f} – {max_fc:,.2f} FCFA  |  **Prix moyen prévu** : {avg_fc:,.2f} FCFA",
+        f"- **Pente attendue** : {slope:,.2f} FCFA/pas",
+        f"- **Momentum récent (20 derniers jours)** : {mom:.2f} %  |  **Vol annualisée récente** : {vol:.2f} %",
+        f"**Verdict** : {verdict}.",
+        "_Rappel : ce résumé est indicatif et ne constitue pas un conseil en investissement._"
+    ]
     return "\n".join(lines)
 
 # --------------------------- APP ---------------------------
 def main():
     apply_dark_theme()
     centered_title("Dashboard Marchés Boursiers – BRVM",
-                   "Analyse technique & fondamentale | Backtests | Prédiction auto (modèle rapide)")
+                   "Analyse technique & fondamentale | Backtests | Prédiction auto (modèles rapides)")
 
-    # ======= TABS =======
     tab_main, tab_forecast = st.tabs(["Tableau de bord", "Prédiction"])
 
     # ===================== TAB PRINCIPAL =====================
     with tab_main:
-        # ===== SIDEBAR =====
         with st.sidebar:
             st.header("Données prix")
             uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
@@ -941,14 +941,11 @@ def main():
         # ===== TRAITEMENTS (filtre global) =====
         df_global = df_original[(df_original['Date'] >= pd.to_datetime(start_date)) & (df_original['Date'] <= pd.to_datetime(end_date))].copy()
 
-        # Technique (à la fréquence choisie)
         df = add_indicators(resample_ohlcv(df_global, freq_code=freq_code), params)
         metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=freq_code)
 
-        # Fondamentaux annuels (se calculent sur le **df_global** filtré)
         ann_df = compute_market_fundamentals_from_original(df_global, shares)
 
-        # Charger DPS/EPS (upload > défauts disques) puis enrichir
         if dps_uploader is not None:
             dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
         elif os.path.exists(DEFAULT_DPS_PATH):
@@ -972,7 +969,7 @@ def main():
         span = _year_span(ann_df)
         fund_title_suffix = f"({span[0]}–{span[1]})" if span else "(n/a)"
 
-        # ===== MÉTRIQUES (format compact pour annualisé) =====
+        # ===== MÉTRIQUES =====
         st.subheader("Métriques principales")
         badge = {"D":"Jour","W":"Semaine","M":"Mois"}[freq_code]
         m1,m2,m3,m4,m5,m6 = st.columns(6)
@@ -1057,10 +1054,7 @@ def main():
     # ===================== TAB PRÉDICTION =====================
     with tab_forecast:
         st.markdown("### Paramètres de prédiction")
-        # Source : même fichier que l'onglet principal (recharger par défaut)
-        # On propose une fenêtre dédiée à la prédiction (ou on reprend toute la série)
         if 'df_original' not in locals():
-            # fallback si utilisateur ouvre directement l'onglet
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
             else:
@@ -1074,7 +1068,6 @@ def main():
         with colB:
             horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=180, value=30, step=1)
 
-        # Préparer série (Close) à une fréquence uniforme (jour ouvré → rééchantillon jour)
         start_f, end_f = (pd.to_datetime(dr_f[0]), pd.to_datetime(dr_f[1])) if isinstance(dr_f, tuple) else (pd.to_datetime(dmin_f), pd.to_datetime(dmax_f))
         df_pred = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
         df_pred = df_pred.sort_values('Date').reset_index(drop=True)
@@ -1082,7 +1075,6 @@ def main():
         if len(df_pred) < 20:
             st.warning("Période trop courte pour comparer plusieurs modèles. Étendez la fenêtre.")
         else:
-            # Uniformiser la fréquence en 'D' (jours civils), forward-fill prix
             full_idx = pd.date_range(df_pred['Date'].min(), df_pred['Date'].max(), freq='D')
             s = df_pred.set_index('Date')['Close'].reindex(full_idx).ffill()
             s.name = 'Close'
@@ -1090,16 +1082,16 @@ def main():
             with st.spinner("Sélection automatique du meilleur modèle…"):
                 best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
 
-            # Graph et résumé
             hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
             fc_fig = plot_forecast(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
                                    title=f"Prévision (meilleur modèle : {best['name']})")
             st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
             last_price = float(s.iloc[-1])
-            st.markdown(forecast_summary(best, int(horizon), last_price))
+            # momentum & volatilité récents (20 derniers jours)
+            recent_returns = s.pct_change().dropna().tail(20)
+            st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
 
-            # Télécharger les prévisions
             last_date = hist_df['Date'].iloc[-1]
             future_idx = pd.date_range(last_date, periods=int(horizon)+1, freq='D')[1:]
             out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
