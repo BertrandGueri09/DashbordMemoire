@@ -284,7 +284,7 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
         fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.55), row=current_row, col=1)
 
     fig.update_layout(height=640, showlegend=True,
-                      legend=dict(orientation='h', yanchor='top', y=-0.12, xanchor='left', x=0),  # <- légende en bas
+                      legend=dict(orientation='h', yanchor='top', y=-0.12, xanchor='left', x=0),
                       margin=dict(t=30, b=60, l=28, r=22))
     set_fig_template(fig)
     return fig
@@ -670,7 +670,7 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
     out = []
     for a, b in windows:
         s, e = max(start, a), min(end, b)
-        if s > e: 
+        if s > e:
             continue
         block = df[(df[yc] >= s) & (df[yc] <= e)]
         if block.empty:
@@ -872,7 +872,7 @@ def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon
 
     fig.update_layout(title=title, height=460,
                       margin=dict(t=52,b=80,l=24,r=12),
-                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))  # <- légende bien en dessous
+                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
@@ -918,7 +918,6 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
 def guide_tab():
     st.markdown("## Guide & Méthodologie")
     st.info("Les **filtres globaux** (fréquence + plage de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
-
     with st.expander("📈 Indicateurs techniques", expanded=True):
         st.markdown("""
 - **MM (SMA)** : moyenne arithmétique des *Close*. Croisement **rapide>lente** = biais haussier.  
@@ -927,25 +926,42 @@ def guide_tab():
 - **RSI (14)** : >70 surachat ; <30 survente ; 50 neutre.  
 - **MACD (12/26/9)** : croisement MACD↑Signal = reprise haussière ; MACD↓Signal = essoufflement.
         """)
-
     with st.expander("📊 Métriques de performance", expanded=False):
         st.markdown("""
 - **Rendement total** ; **Annualisé** (selon fréquence) ; **Volatilité** ; **Sharpe** (taux sans risque paramétrable) ; **Max Drawdown**.  
 - **CAGR** et **Synthèse** dans la section fondamentaux.
         """)
-
     with st.expander("🧪 Backtests", expanded=False):
-        st.markdown("""
-- **SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.
-        """)
-
+        st.markdown("**SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.")
     with st.expander("🤖 Modèles de prédiction", expanded=False):
-        st.markdown(f"""
+        st.markdown("""
 - **ARIMA** & **SARIMA (saisonnalité 5 jours ouvrés)**.  
 - **ARX+GARCH(1,1)** (*si `arch` est installé*) : moyenne AR(1) + volatilité conditionnelle.  
 - **Sélection automatique** par **sMAPE** (mini-validation).  
 - **Graphique** : trajectoire prévue + **intervalle** (IC 80% pour ARIMA/SARIMA ou bandes de volatilité pour GARCH).
         """)
+
+# ------ utilitaire : détecter fréquence & pas/an ------
+def _infer_freq_and_steps_per_year(idx: pd.DatetimeIndex) -> Tuple[str, int]:
+    inf = pd.infer_freq(idx)
+    if inf is None:
+        # fallback : pas médian
+        delta = idx.to_series().diff().median()
+        if pd.isna(delta):
+            return "D", 252
+        days = max(1, int(round(delta / pd.Timedelta(days=1))))
+        if days == 1: return "D", 252
+        if 5 <= days <= 8: return "W", 52
+        if 28 <= days <= 31: return "M", 12
+        return "D", 252
+    if inf.startswith("B") or inf.startswith("D"):
+        return "B", 252  # jours ouvrés
+    if inf.startswith("W"):
+        return "W", 52
+    if inf.startswith("M"):
+        return "M", 12
+    # défaut
+    return "D", 252
 
 # --------------------------- APP ---------------------------
 def main():
@@ -1099,8 +1115,7 @@ def main():
         m1,m2,m3,m4,m5,m6 = st.columns(6)
         m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
         m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
-        # -> scientifique
-        m3.metric("Rend. annualisé", format_pct_scientific(metrics['annualized_return']))
+        m3.metric("Rend. annualisé", format_pct_scientific(metrics['annualized_return']))  # scientifique
         m4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
         m5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
         m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
@@ -1122,13 +1137,10 @@ def main():
         if (ann_df is not None) and (not ann_df.empty):
             fund_fig = plot_market_fundamentals_summary(ann_df)
             st.plotly_chart(fund_fig, use_container_width=True, config={"displaylogo": False})
-
             st.markdown(summarize_fundamentals(ann_df))
-
             st.markdown("**Régimes de marché (par périodes standards)**")
             for line in describe_market_regimes(ann_df):
                 st.write(f"- {line}")
-
             fname = f"CFAOCI_fondamentaux_{span[0]}_{span[1]}.csv" if span else "CFAOCI_fondamentaux.csv"
             st.download_button(
                 f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
@@ -1163,8 +1175,7 @@ def main():
             d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
             d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
             d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.1f}%")
-            # -> scientifique
-            d4.metric("Perf. annualisée", format_pct_scientific(bt_stats['perf_annualisee_%']))
+            d4.metric("Perf. annualisée", format_pct_scientific(bt_stats['perf_annualisee_%']))  # scientifique
             d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.1f}%")
             d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
 
@@ -1194,37 +1205,48 @@ def main():
             dr_f = st.date_input("Fenêtre spécifique à la prédiction", value=(dmin_f, dmax_f), min_value=dmin_f, max_value=dmax_f, key="pred_dates")
             start_f, end_f = (pd.to_datetime(dr_f[0]), pd.to_datetime(dr_f[1])) if isinstance(dr_f, tuple) else (pd.to_datetime(dmin_f), pd.to_datetime(dmax_f))
 
-        horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=180, value=30, step=1)
-
+        # Série de travail
         df_pred = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
         df_pred = df_pred.sort_values('Date').reset_index(drop=True)
-
-        if len(df_pred) < 30:
+        s = df_pred.set_index('Date')['Close'].astype(float)
+        if len(s) < 30:
             st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
-        else:
-            s = df_pred.set_index('Date')['Close'].astype(float)
+            st.stop()
 
-            with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
-                best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
+        # Horizon : entrée libre + bouton 5 ans auto
+        freq_code, steps_per_year = _infer_freq_and_steps_per_year(s.index)
+        colH1, colH2 = st.columns([2,1])
+        with colH1:
+            horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=5000,
+                                      value=int(30), step=1,
+                                      help="Nombre de pas (jours ouvrés/semaines/mois) à prévoir.")
+        with colH2:
+            if st.button(f"Prévoir 5 ans (≈ {5*steps_per_year} pas)"):
+                horizon = 5 * steps_per_year
+        st.caption(f"Fréquence détectée : **{freq_code}** • Pas/an ≈ **{steps_per_year}** • Horizon actuel : **{horizon}**")
 
-            hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
-            fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
-                                     bands=best.get("bands"),
-                                     title=f"Prévision (meilleur modèle : {best['name']})")
-            st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
+        with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
+            best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
 
-            last_price = float(s.iloc[-1])
-            recent_returns = s.pct_change().dropna().tail(20)
-            st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
+        hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
+        fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
+                                 bands=best.get("bands"),
+                                 title=f"Prévision (meilleur modèle : {best['name']})")
+        st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
-            last_date = hist_df['Date'].iloc[-1]
-            future_idx = pd.date_range(last_date, periods=int(horizon)+1, freq='D')[1:]
-            out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
-            st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
-                               file_name="previsions_auto.csv", mime="text/csv")
+        last_price = float(s.iloc[-1])
+        recent_returns = s.pct_change().dropna().tail(20)
+        st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
 
-            if not ARCH_AVAILABLE:
-                st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
+        last_date = hist_df['Date'].iloc[-1]
+        freq_for_range = "B" if freq_code in ("B","D") else ("W" if freq_code=="W" else "M")
+        future_idx = pd.date_range(last_date, periods=int(horizon)+1, freq=freq_for_range)[1:]
+        out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
+        st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
+                           file_name="previsions_auto.csv", mime="text/csv")
+
+        if not ARCH_AVAILABLE:
+            st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
 
     # ===================== TAB GUIDE =====================
     with tab_guide:
