@@ -284,7 +284,7 @@ def plotly_combined_chart(df: pd.DataFrame, chart_type: str, params: Dict) -> go
         fig.add_trace(go.Bar(x=df['Date'], y=df['MACD_H'], name='Hist', opacity=0.55), row=current_row, col=1)
 
     fig.update_layout(height=640, showlegend=True,
-                      legend=dict(orientation='h', yanchor='top', y=-0.14, xanchor='left', x=0),  # légèrement relevé
+                      legend=dict(orientation='h', yanchor='top', y=-0.14, xanchor='left', x=0),
                       margin=dict(t=30, b=60, l=28, r=22))
     set_fig_template(fig)
     return fig
@@ -876,6 +876,49 @@ def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon
     set_fig_template(fig)
     return fig
 
+# ======= NOUVEAU : graphique superposé “horizon courant” vs “projection 5 ans” =======
+def forecast_dual_figure(history: pd.DataFrame,
+                         pred_a: np.ndarray, bands_a, label_a: str, horizon_a: int,
+                         pred_b: np.ndarray, bands_b, label_b: str, horizon_b: int,
+                         title: str = "Prévisions superposées (horizon courant vs 5 ans)") -> go.Figure:
+    # Couleurs distinctes
+    color_a = "#4ade80"  # vert
+    color_b = "#60a5fa"  # bleu
+
+    fig = go.Figure()
+    # Historique
+    fig.add_trace(go.Scatter(x=history['Date'], y=history['Close'], mode='lines', name='Historique', line=dict(width=2.3)))
+
+    last_date = pd.to_datetime(history['Date'].iloc[-1])
+    inferred = pd.infer_freq(history['Date'])
+    freq = inferred if inferred is not None else 'D'
+
+    # Axe futur A
+    future_idx_a = pd.date_range(last_date, periods=horizon_a+1, freq=freq)[1:]
+    if bands_a is not None and len(bands_a) == 2 and len(bands_a[0]) == horizon_a and len(bands_a[1]) == horizon_a:
+        lo_a, hi_a = bands_a
+        fig.add_trace(go.Scatter(x=future_idx_a, y=hi_a, line=dict(width=0, color=color_a), showlegend=False))
+        fig.add_trace(go.Scatter(x=future_idx_a, y=lo_a, fill='tonexty', name=f'Intervalle {label_a}', opacity=0.15, line=dict(width=0, color=color_a)))
+
+    fig.add_trace(go.Scatter(x=future_idx_a, y=pred_a, mode='lines+markers', name=label_a,
+                             line=dict(width=2.8, color=color_a)))
+
+    # Axe futur B
+    future_idx_b = pd.date_range(last_date, periods=horizon_b+1, freq=freq)[1:]
+    if bands_b is not None and len(bands_b) == 2 and len(bands_b[0]) == horizon_b and len(bands_b[1]) == horizon_b:
+        lo_b, hi_b = bands_b
+        fig.add_trace(go.Scatter(x=future_idx_b, y=hi_b, line=dict(width=0, color=color_b), showlegend=False))
+        fig.add_trace(go.Scatter(x=future_idx_b, y=lo_b, fill='tonexty', name=f'Intervalle {label_b}', opacity=0.15, line=dict(width=0, color=color_b)))
+
+    fig.add_trace(go.Scatter(x=future_idx_b, y=pred_b, mode='lines+markers', name=label_b,
+                             line=dict(width=2.8, color=color_b)))
+
+    fig.update_layout(title=title, height=520,
+                      margin=dict(t=52,b=90,l=24,r=12),
+                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
+    set_fig_template(fig)
+    return fig
+
 def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, recent_returns: pd.Series) -> str:
     name = best.get("name","?")
     score = best.get("score", np.nan)
@@ -1213,37 +1256,56 @@ def main():
             st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
             st.stop()
 
-        # Horizon : 5 ans AUTO (désactivable)
+        # Détection fréquence & pas/an
         freq_code, steps_per_year = _infer_freq_and_steps_per_year(s.index)
-        auto_5y = st.checkbox("Prévision automatique sur 5 ans", value=True, help="Décochez pour saisir un horizon manuel.")
-        if auto_5y:
-            horizon = 5 * steps_per_year
-            st.info(f"Horizon fixé automatiquement à ~5 ans ⇒ **{horizon} pas** (fréquence détectée : **{freq_code}**, ~{steps_per_year} pas/an).")
-        else:
-            horizon = st.number_input("Horizon de prévision (pas de temps)", min_value=1, max_value=5000,
-                                      value=int(30), step=1,
-                                      help="Nombre de pas (jours ouvrés/semaines/mois) à prévoir.")
-            st.caption(f"Fréquence détectée : **{freq_code}** • Pas/an ≈ **{steps_per_year}** • Horizon actuel : **{horizon}**")
 
-        with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
-            best = choose_best_model(s, horizon=int(horizon), valid_ratio=0.2)
+        # ====== NOUVEAU : 2 horizons en parallèle ======
+        c1, c2 = st.columns([2,1])
+        with c1:
+            horizon_cur = st.number_input("Horizon courant (pas de temps)", min_value=1, max_value=5000, value=int(60), step=1,
+                                          help="Nombre de pas (jours ouvrés/semaines/mois) à prévoir pour l’horizon courant.")
+        with c2:
+            horizon_5y = 5 * steps_per_year
+            st.caption(f"5 ans ≈ **{horizon_5y}** pas (fréquence détectée **{freq_code}**, ~{steps_per_year}/an)")
 
+        # Entraînement / sélection automatique — en parallèle logique
+        with st.spinner("Sélection automatique des meilleurs modèles (ARIMA / SARIMA s=5 / GARCH)…"):
+            best_cur = choose_best_model(s, horizon=int(horizon_cur), valid_ratio=0.2)
+            best_5y  = choose_best_model(s, horizon=int(horizon_5y),   valid_ratio=0.2)
+
+        # Historique
         hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
-        fc_fig = forecast_figure(hist_df, 'Close', np.asarray(best['pred'], dtype=float), int(horizon),
-                                 bands=best.get("bands"),
-                                 title=f"Prévision {'5 ans' if auto_5y else ''} (meilleur modèle : {best['name']})")
-        st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
+        # Graphique superposé
+        dual_fig = forecast_dual_figure(
+            history=hist_df,
+            pred_a=np.asarray(best_cur['pred'], dtype=float), bands_a=best_cur.get("bands"), label_a=f"Horizon courant ({horizon_cur}) – {best_cur['name']}", horizon_a=int(horizon_cur),
+            pred_b=np.asarray(best_5y['pred'], dtype=float),  bands_b=best_5y.get("bands"),  label_b=f"Projection 5 ans ({horizon_5y}) – {best_5y['name']}", horizon_b=int(horizon_5y),
+            title="Prévisions superposées : Horizon courant vs Projection 5 ans"
+        )
+        st.plotly_chart(dual_fig, use_container_width=True, config={"displaylogo": False})
+
+        # Résumés
         last_price = float(s.iloc[-1])
         recent_returns = s.pct_change().dropna().tail(20)
-        st.markdown(forecast_summary_for_investors(best, int(horizon), last_price, recent_returns))
+        st.markdown("#### Synthèses")
+        st.markdown("**Horizon courant**")
+        st.markdown(forecast_summary_for_investors(best_cur, int(horizon_cur), last_price, recent_returns))
+        st.markdown("---")
+        st.markdown("**Projection 5 ans**")
+        st.markdown(forecast_summary_for_investors(best_5y, int(horizon_5y), last_price, recent_returns))
 
+        # Export CSV combiné
         last_date = hist_df['Date'].iloc[-1]
         freq_for_range = "B" if freq_code in ("B","D") else ("W" if freq_code=="W" else "M")
-        future_idx = pd.date_range(last_date, periods=int(horizon)+1, freq=freq_for_range)[1:]
-        out_fc = pd.DataFrame({'Date': future_idx, 'Forecast_Close': np.asarray(best['pred'], dtype=float)})
-        st.download_button("Télécharger les prévisions (CSV)", out_fc.to_csv(index=False).encode('utf-8'),
-                           file_name="previsions_auto.csv", mime="text/csv")
+        future_idx_cur = pd.date_range(last_date, periods=int(horizon_cur)+1, freq=freq_for_range)[1:]
+        future_idx_5y  = pd.date_range(last_date, periods=int(horizon_5y)+1,  freq=freq_for_range)[1:]
+
+        out_cur = pd.DataFrame({'Date': future_idx_cur, 'Forecast_Close_Current': np.asarray(best_cur['pred'], dtype=float)})
+        out_5y  = pd.DataFrame({'Date': future_idx_5y,  'Forecast_Close_5Y':      np.asarray(best_5y['pred'],  dtype=float)})
+        out_all = pd.merge(out_cur, out_5y, on='Date', how='outer').sort_values('Date')
+        st.download_button("Télécharger prévisions superposées (CSV)", out_all.to_csv(index=False).encode('utf-8'),
+                           file_name="previsions_superposees.csv", mime="text/csv")
 
         if not ARCH_AVAILABLE:
             st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
