@@ -966,7 +966,6 @@ def forecast_dual_figure(history: pd.DataFrame,
 # --------------------------- GUIDE (onglet) ---------------------------
 def guide_tab():
     st.markdown("## Guide & Méthodologie")
-    st.info("Les **filtres globaux** (fréquence + plage de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
     with st.expander("Indicateurs techniques", expanded=True):
         st.markdown("""
 - **MM (SMA)** : moyenne arithmétique des *Close*. Croisement **rapide>lente** = biais haussier.  
@@ -984,7 +983,7 @@ def guide_tab():
         st.markdown("**SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.")
     with st.expander("Modèles de prédiction", expanded=False):
         st.markdown("""
-- **ARIMA** & **SARIMA (saisonnalité 5 jours ouvrés)**.  
+- **ARIMA** & **SARIMA (saisonnalité 5ans)**.  
 - **ARX+GARCH(1,1)** (*si `arch` est installé*) : moyenne AR(1) + volatilité conditionnelle.  
 - **Sélection automatique** par **sMAPE** (mini-validation).  
 - **Graphique** : trajectoire prévue + **intervalle** (IC 80% pour ARIMA/SARIMA ou bandes de volatilité pour GARCH).
@@ -1025,7 +1024,7 @@ def main():
     if 'global_freq_code' not in st.session_state:
         st.session_state.global_freq_code = 'D'
 
-    tab_main, tab_forecast, tab_guide = st.tabs(["Tableau de bord", "Prédiction", "Guide & Méthodo"])
+    tab_main, tab_forecast, tab_guide = st.tabs(["Tableau de bord", "Prédiction", "Guide & Méthode"])
 
     # ===================== TAB PRINCIPAL =====================
     with tab_main:
@@ -1288,6 +1287,11 @@ def main():
         )
         st.plotly_chart(dual_fig, use_container_width=True, config={"displaylogo": False})
 
+        #Projections 5ans
+        st.markdown("---\n### Projection 5 ans")
+        st.markdown(forecast_summary_for_investors(best_long, int(horizon_long), last_price, recent_returns))
+
+
         # Téléchargement CSV des prévisions superposées
         last_date = hist_df['Date'].iloc[-1]
         idx_short = _future_index(last_date, hist_df['Date'], int(horizon_short))
@@ -1338,4 +1342,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
