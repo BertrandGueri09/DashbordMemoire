@@ -967,7 +967,7 @@ def forecast_dual_figure(history: pd.DataFrame,
 def guide_tab():
     st.markdown("## Guide & Méthodologie")
     st.info("Les **filtres globaux** (fréquence + plage de dates) s’appliquent aux onglets *Tableau de bord* et *Prédiction*.")
-    with st.expander("📈 Indicateurs techniques", expanded=True):
+    with st.expander("Indicateurs techniques", expanded=True):
         st.markdown("""
 - **MM (SMA)** : moyenne arithmétique des *Close*. Croisement **rapide>lente** = biais haussier.  
 - **EMA** : moyenne exponentielle (réagit plus vite).  
@@ -975,14 +975,14 @@ def guide_tab():
 - **RSI (14)** : >70 surachat ; <30 survente ; 50 neutre.  
 - **MACD (12/26/9)** : croisement MACD↑Signal = reprise haussière ; MACD↓Signal = essoufflement.
         """)
-    with st.expander("📊 Métriques de performance", expanded=False):
+    with st.expander("Métriques de performance", expanded=False):
         st.markdown("""
 - **Rendement total** ; **Annualisé** (selon fréquence) ; **Volatilité** ; **Sharpe** (taux sans risque paramétrable) ; **Max Drawdown**.  
 - **CAGR** et **Synthèse** dans la section fondamentaux.
         """)
-    with st.expander("🧪 Backtests", expanded=False):
+    with st.expander("Backtests", expanded=False):
         st.markdown("**SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.")
-    with st.expander("🤖 Modèles de prédiction", expanded=False):
+    with st.expander("Modèles de prédiction", expanded=False):
         st.markdown("""
 - **ARIMA** & **SARIMA (saisonnalité 5 jours ouvrés)**.  
 - **ARX+GARCH(1,1)** (*si `arch` est installé*) : moyenne AR(1) + volatilité conditionnelle.  
@@ -1288,16 +1288,6 @@ def main():
         )
         st.plotly_chart(dual_fig, use_container_width=True, config={"displaylogo": False})
 
-        # Synthèses condensées (pas de doublon)
-        st.markdown("## Synthèses")
-        st.markdown("### Horizon courant")
-        last_price = float(s.iloc[-1])
-        recent_returns = s.pct_change().dropna().tail(20)
-        st.markdown(forecast_summary_for_investors(best_short, int(horizon_short), last_price, recent_returns))
-
-        st.markdown("---\n### Projection 5 ans")
-        st.markdown(forecast_summary_for_investors(best_long, int(horizon_long), last_price, recent_returns))
-
         # Téléchargement CSV des prévisions superposées
         last_date = hist_df['Date'].iloc[-1]
         idx_short = _future_index(last_date, hist_df['Date'], int(horizon_short))
@@ -1348,3 +1338,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
