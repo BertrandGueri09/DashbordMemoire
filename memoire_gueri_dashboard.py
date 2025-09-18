@@ -1289,6 +1289,8 @@ def main():
 
         #Projections 5ans
         st.markdown("---\n### Projection 5 ans")
+        last_price = float(s.iloc[-1])
+        recent_returns = s.pct_change().dropna().tail(20)
         st.markdown(forecast_summary_for_investors(best_long, int(horizon_long), last_price, recent_returns))
 
 
@@ -1342,5 +1344,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
