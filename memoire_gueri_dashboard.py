@@ -870,6 +870,11 @@ def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon
 
     fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
 
+    # --- NOUVEAU : étendre l'axe X jusqu'à la dernière date future + ticks annuels
+    x_min = pd.to_datetime(history['Date'].min())
+    x_max = pd.to_datetime(future_idx[-1]) if len(future_idx) else pd.to_datetime(history['Date'].max())
+    fig.update_xaxes(range=[x_min, x_max], dtick="M12", tickformat="%Y", ticklabelmode="period")
+
     fig.update_layout(title=title, height=460,
                       margin=dict(t=52,b=80,l=24,r=12),
                       legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
@@ -953,6 +958,11 @@ def forecast_dual_figure(history: pd.DataFrame,
         a, b = np.polyfit(x, pred_long, 1)  # y = a*x + b
         trend = a * x + b
         fig.add_trace(go.Scatter(x=idx_long, y=trend, mode='lines', name='Tendance 5 ans', line=dict(width=2.2, dash='dash', color="#ff7f0e")))
+
+    # --- NOUVEAU : étendre l'axe X sur toute l'horizon 5 ans + graduations annuelles
+    x_min = pd.to_datetime(history['Date'].min())
+    x_max = pd.to_datetime(idx_long[-1]) if len(idx_long) else pd.to_datetime(history['Date'].max())
+    fig.update_xaxes(range=[x_min, x_max], dtick="M12", tickformat="%Y", ticklabelmode="period")
 
     fig.update_layout(
         title="Prévisions superposées : horizon courant vs projection 5 ans",
@@ -1293,7 +1303,6 @@ def main():
         recent_returns = s.pct_change().dropna().tail(20)
         st.markdown(forecast_summary_for_investors(best_long, int(horizon_long), last_price, recent_returns))
 
-
         # Téléchargement CSV des prévisions superposées
         last_date = hist_df['Date'].iloc[-1]
         idx_short = _future_index(last_date, hist_df['Date'], int(horizon_short))
@@ -1344,6 +1353,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
