@@ -871,50 +871,7 @@ def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon
     fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
 
     fig.update_layout(title=title, height=460,
-                      margin=dict(t=44,b=84,l=24,r=12),
-                      legend=dict(orientation='h', yanchor='top', y=-0.16, xanchor='left', x=0))
-    set_fig_template(fig)
-    return fig
-
-# ======= NOUVEAU : graphique superposé “horizon courant” vs “projection 5 ans” =======
-def forecast_dual_figure(history: pd.DataFrame,
-                         pred_a: np.ndarray, bands_a, label_a: str, horizon_a: int,
-                         pred_b: np.ndarray, bands_b, label_b: str, horizon_b: int,
-                         title: str = "Prévisions superposées (horizon courant vs 5 ans)") -> go.Figure:
-    # Couleurs distinctes
-    color_a = "#4ade80"  # vert
-    color_b = "#60a5fa"  # bleu
-
-    fig = go.Figure()
-    # Historique
-    fig.add_trace(go.Scatter(x=history['Date'], y=history['Close'], mode='lines', name='Historique', line=dict(width=2.3)))
-
-    last_date = pd.to_datetime(history['Date'].iloc[-1])
-    inferred = pd.infer_freq(history['Date'])
-    freq = inferred if inferred is not None else 'D'
-
-    # Axe futur A
-    future_idx_a = pd.date_range(last_date, periods=horizon_a+1, freq=freq)[1:]
-    if bands_a is not None and len(bands_a) == 2 and len(bands_a[0]) == horizon_a and len(bands_a[1]) == horizon_a:
-        lo_a, hi_a = bands_a
-        fig.add_trace(go.Scatter(x=future_idx_a, y=hi_a, line=dict(width=0, color=color_a), showlegend=False))
-        fig.add_trace(go.Scatter(x=future_idx_a, y=lo_a, fill='tonexty', name=f'Intervalle {label_a}', opacity=0.15, line=dict(width=0, color=color_a)))
-
-    fig.add_trace(go.Scatter(x=future_idx_a, y=pred_a, mode='lines+markers', name=label_a,
-                             line=dict(width=2.8, color=color_a)))
-
-    # Axe futur B
-    future_idx_b = pd.date_range(last_date, periods=horizon_b+1, freq=freq)[1:]
-    if bands_b is not None and len(bands_b) == 2 and len(bands_b[0]) == horizon_b and len(bands_b[1]) == horizon_b:
-        lo_b, hi_b = bands_b
-        fig.add_trace(go.Scatter(x=future_idx_b, y=hi_b, line=dict(width=0, color=color_b), showlegend=False))
-        fig.add_trace(go.Scatter(x=future_idx_b, y=lo_b, fill='tonexty', name=f'Intervalle {label_b}', opacity=0.15, line=dict(width=0, color=color_b)))
-
-    fig.add_trace(go.Scatter(x=future_idx_b, y=pred_b, mode='lines+markers', name=label_b,
-                             line=dict(width=2.8, color=color_b)))
-
-    fig.update_layout(title=title, height=520,
-                      margin=dict(t=52,b=90,l=24,r=12),
+                      margin=dict(t=52,b=80,l=24,r=12),
                       legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
@@ -956,6 +913,55 @@ def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, 
         "_Rappel : ce résumé est indicatif et ne constitue pas un conseil en investissement._"
     ]
     return "\n".join(lines)
+
+# ---------- NOUVEAU : superposition “horizon courant” vs “projection 5 ans” ----------
+def _future_index(last_date: pd.Timestamp, history_index: pd.DatetimeIndex, horizon: int) -> pd.DatetimeIndex:
+    inferred = pd.infer_freq(history_index)
+    freq = inferred if inferred is not None else 'D'
+    return pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
+
+def forecast_dual_figure(history: pd.DataFrame,
+                         pred_short: np.ndarray, horizon_short: int, bands_short,
+                         pred_long: np.ndarray,  horizon_long: int,  bands_long,
+                         show_trend_long: bool = True) -> go.Figure:
+    fig = go.Figure()
+    # Historique
+    fig.add_trace(go.Scatter(x=history['Date'], y=history['Close'], mode='lines', name='Historique', line=dict(width=2.6)))
+    last_date = pd.to_datetime(history['Date'].iloc[-1])
+    idx_short = _future_index(last_date, history['Date'], horizon_short)
+    idx_long  = _future_index(last_date, history['Date'], horizon_long)
+
+    # Bandes court terme
+    if bands_short is not None and len(bands_short[0]) == horizon_short:
+        lo_s, hi_s = bands_short
+        fig.add_trace(go.Scatter(x=idx_short, y=hi_s, line=dict(width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=idx_short, y=lo_s, fill='tonexty', name='IC Horizon courant', opacity=0.18, line=dict(width=0)))
+
+    # Bandes long terme
+    if bands_long is not None and len(bands_long[0]) == horizon_long:
+        lo_l, hi_l = bands_long
+        fig.add_trace(go.Scatter(x=idx_long, y=hi_l, line=dict(width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=idx_long, y=lo_l, fill='tonexty', name='IC Projection 5 ans', opacity=0.12, line=dict(width=0)))
+
+    # Courbes
+    fig.add_trace(go.Scatter(x=idx_short, y=pred_short, mode='lines+markers', name='Horizon courant', line=dict(width=2.8, color="#1f77b4")))
+    fig.add_trace(go.Scatter(x=idx_long,  y=pred_long,  mode='lines+markers', name='Projection 5 ans', line=dict(width=2.8, color="#ff7f0e")))
+
+    # Tendance 5 ans (régression linéaire sur la projection)
+    if show_trend_long and len(pred_long) >= 2:
+        x = np.arange(1, len(pred_long)+1)
+        a, b = np.polyfit(x, pred_long, 1)  # y = a*x + b
+        trend = a * x + b
+        fig.add_trace(go.Scatter(x=idx_long, y=trend, mode='lines', name='Tendance 5 ans', line=dict(width=2.2, dash='dash', color="#ff7f0e")))
+
+    fig.update_layout(
+        title="Prévisions superposées : horizon courant vs projection 5 ans",
+        height=520,
+        margin=dict(t=60, b=90, l=24, r=12),
+        legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0)
+    )
+    set_fig_template(fig)
+    return fig
 
 # --------------------------- GUIDE (onglet) ---------------------------
 def guide_tab():
@@ -1256,56 +1262,81 @@ def main():
             st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
             st.stop()
 
-        # Détection fréquence & pas/an
+        # Fréquence et pas/an
         freq_code, steps_per_year = _infer_freq_and_steps_per_year(s.index)
 
-        # ====== NOUVEAU : 2 horizons en parallèle ======
-        c1, c2 = st.columns([2,1])
-        with c1:
-            horizon_cur = st.number_input("Horizon courant (pas de temps)", min_value=1, max_value=5000, value=int(60), step=1,
-                                          help="Nombre de pas (jours ouvrés/semaines/mois) à prévoir pour l’horizon courant.")
-        with c2:
-            horizon_5y = 5 * steps_per_year
-            st.caption(f"5 ans ≈ **{horizon_5y}** pas (fréquence détectée **{freq_code}**, ~{steps_per_year}/an)")
+        # Horizon courant (manuel) + Projection 5 ans (fixe)
+        colH1, colH2 = st.columns([2,1])
+        with colH1:
+            horizon_short = st.number_input("Horizon courant (pas de temps)", min_value=1, max_value=5000, value=60, step=1)
+        with colH2:
+            st.caption(f"Fréquence détectée : **{freq_code}** • ~**{steps_per_year}** pas/an")
+        horizon_long = 5 * steps_per_year  # toujours 5 ans
 
-        # Entraînement / sélection automatique — en parallèle logique
-        with st.spinner("Sélection automatique des meilleurs modèles (ARIMA / SARIMA s=5 / GARCH)…"):
-            best_cur = choose_best_model(s, horizon=int(horizon_cur), valid_ratio=0.2)
-            best_5y  = choose_best_model(s, horizon=int(horizon_5y),   valid_ratio=0.2)
+        with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
+            best_short = choose_best_model(s, horizon=int(horizon_short), valid_ratio=0.2)
+            best_long  = choose_best_model(s, horizon=int(horizon_long),  valid_ratio=0.2)
 
-        # Historique
         hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
 
-        # Graphique superposé
+        # Graphe superposé + tendance 5 ans
         dual_fig = forecast_dual_figure(
-            history=hist_df,
-            pred_a=np.asarray(best_cur['pred'], dtype=float), bands_a=best_cur.get("bands"), label_a=f"Horizon courant ({horizon_cur}) – {best_cur['name']}", horizon_a=int(horizon_cur),
-            pred_b=np.asarray(best_5y['pred'], dtype=float),  bands_b=best_5y.get("bands"),  label_b=f"Projection 5 ans ({horizon_5y}) – {best_5y['name']}", horizon_b=int(horizon_5y),
-            title="Prévisions superposées : Horizon courant vs Projection 5 ans"
+            hist_df,
+            np.asarray(best_short['pred'], dtype=float), int(horizon_short), best_short.get("bands"),
+            np.asarray(best_long['pred'],  dtype=float), int(horizon_long),  best_long.get("bands"),
+            show_trend_long=True
         )
         st.plotly_chart(dual_fig, use_container_width=True, config={"displaylogo": False})
 
-        # Résumés
+        # Synthèses condensées (pas de doublon)
+        st.markdown("## Synthèses")
+        st.markdown("### Horizon courant")
         last_price = float(s.iloc[-1])
         recent_returns = s.pct_change().dropna().tail(20)
-        st.markdown("#### Synthèses")
-        st.markdown("**Horizon courant**")
-        st.markdown(forecast_summary_for_investors(best_cur, int(horizon_cur), last_price, recent_returns))
-        st.markdown("---")
-        st.markdown("**Projection 5 ans**")
-        st.markdown(forecast_summary_for_investors(best_5y, int(horizon_5y), last_price, recent_returns))
+        st.markdown(forecast_summary_for_investors(best_short, int(horizon_short), last_price, recent_returns))
 
-        # Export CSV combiné
+        st.markdown("---\n### Projection 5 ans")
+        st.markdown(forecast_summary_for_investors(best_long, int(horizon_long), last_price, recent_returns))
+
+        # Téléchargement CSV des prévisions superposées
         last_date = hist_df['Date'].iloc[-1]
-        freq_for_range = "B" if freq_code in ("B","D") else ("W" if freq_code=="W" else "M")
-        future_idx_cur = pd.date_range(last_date, periods=int(horizon_cur)+1, freq=freq_for_range)[1:]
-        future_idx_5y  = pd.date_range(last_date, periods=int(horizon_5y)+1,  freq=freq_for_range)[1:]
+        idx_short = _future_index(last_date, hist_df['Date'], int(horizon_short))
+        idx_long  = _future_index(last_date, hist_df['Date'], int(horizon_long))
 
-        out_cur = pd.DataFrame({'Date': future_idx_cur, 'Forecast_Close_Current': np.asarray(best_cur['pred'], dtype=float)})
-        out_5y  = pd.DataFrame({'Date': future_idx_5y,  'Forecast_Close_5Y':      np.asarray(best_5y['pred'],  dtype=float)})
-        out_all = pd.merge(out_cur, out_5y, on='Date', how='outer').sort_values('Date')
-        st.download_button("Télécharger prévisions superposées (CSV)", out_all.to_csv(index=False).encode('utf-8'),
-                           file_name="previsions_superposees.csv", mime="text/csv")
+        # Tendance 5 ans pour le CSV
+        x = np.arange(1, len(best_long['pred'])+1)
+        if len(x) >= 2:
+            a, b = np.polyfit(x, best_long['pred'], 1)
+            trend_long = a * x + b
+        else:
+            trend_long = np.array(best_long['pred'])
+
+        def _bands_to_cols(bands, horizon):
+            if bands is None or len(bands[0]) != horizon:
+                return [np.repeat(np.nan, horizon), np.repeat(np.nan, horizon)]
+            return [bands[0], bands[1]]
+
+        lo_s, hi_s = _bands_to_cols(best_short.get("bands"), int(horizon_short))
+        lo_l, hi_l = _bands_to_cols(best_long.get("bands"),  int(horizon_long))
+
+        out_fc = pd.DataFrame({
+            'Date_short': idx_short, 'Forecast_short': best_short['pred'], 'Low_short': lo_s, 'High_short': hi_s
+        })
+        out_fc_long = pd.DataFrame({
+            'Date_long': idx_long, 'Forecast_5y': best_long['pred'], 'Low_5y': lo_l, 'High_5y': hi_l, 'Trend_5y': trend_long
+        })
+        # fusion simple en colonnes séparées (long = plus long)
+        out = pd.concat([
+            out_fc.set_index('Date_short').reindex(idx_long),
+            out_fc_long.set_index('Date_long')
+        ], axis=1).reset_index().rename(columns={'index':'Date'})
+
+        st.download_button(
+            "Télécharger prévisions superposées (CSV)",
+            out.to_csv(index=False).encode('utf-8'),
+            file_name="previsions_superposees.csv",
+            mime="text/csv"
+        )
 
         if not ARCH_AVAILABLE:
             st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
