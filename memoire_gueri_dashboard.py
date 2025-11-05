@@ -798,8 +798,7 @@ def guide_tab():
 # --------------------------- APP ---------------------------
 def main():
     apply_dark_theme()
-    centered_title("Dashboard Marchés Boursiers – BRVM",
-                   "Filtres globaux | Analyse technique & fondamentale | Backtests | Prévision ARIMA(1,0,1)+GARCH(1,1) (mensuel) | Simulation (mensuel)")
+    centered_title("MODELISATION ET PREVISION DE L’EVOLUTION DU PRIX DE L’ACTION CFAO Motors Côte d’Ivoire – BRVM")
 
     # État global
     if 'global_date_start' not in st.session_state:
@@ -1168,3 +1167,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
