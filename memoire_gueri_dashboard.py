@@ -1,4 +1,5 @@
-# memoire_gueri_dashboard.py — Thème sombre + Filtres globaux + Fondamentaux + Backtests + Auto-forecast + Guide
+# memoire_gueri_dashboard.py — Thème sombre + Filtres globaux (période+fréquence) appliqués partout
+# Fondamentaux + Backtests + Prévision (ARIMA(1,0,1)+GARCH(1,1) MENSUEL FIXE) + Simulation (MENSUEL FIXE) + Guide
 # ------------------------------------------------------------------------------------------------------------
 import streamlit as st
 import pandas as pd
@@ -8,19 +9,17 @@ import re
 import os
 import warnings
 from typing import Union, Dict, Tuple, List, Optional
+from math import sqrt
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from math import sqrt
 
-# Statsmodels (prévisions)
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
+# Statsmodels
 from statsmodels.tsa.arima.model import ARIMA
-from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-# GARCH (optionnel)
+# GARCH (arch)
 try:
-    from arch.univariate import ARX, GARCH as ARCH_GARCH, ConstantMean
+    from arch.univariate import GARCH as ARCH_GARCH, ConstantMean
     ARCH_AVAILABLE = True
 except Exception:
     ARCH_AVAILABLE = False
@@ -43,7 +42,7 @@ DEFAULT_DPS_PATH   = "dps_exemple.csv"
 DEFAULT_EPS_PATH   = "eps_exemple.csv"
 DEFAULT_NET_PATH   = "net_income_exemple.csv"
 
-# ===== CSS sombre compact + Titre lisible (abaissé) =====
+# ===== CSS sombre compact + Titre lisible =====
 BASE_CSS = """
 <style>
 .block-container {padding-top: 1.2rem; padding-bottom: 0.8rem; max-width: 1600px;}
@@ -57,36 +56,10 @@ p, li { line-height: 1.38; font-size: 0.96rem; }
 h2, h3, h4 { margin-bottom: 0.25rem; }
 hr { margin: 0.6rem 0 0.7rem 0; }
 .small-note { font-size: 0.9rem; color: #c9c7c4; }
-
-/* Titre centré — lisibilité + position abaissée */
-.app-title {
-  text-align: center;
-  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
-  font-weight: 800;
-  font-size: clamp(22px, 2.1vw, 30px);
-  line-height: 1.12;
-  margin: 0.7rem 0 0.45rem 0;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-variant-ligatures: none;
-  font-feature-settings: "liga" 0, "clig" 0, "kern" 1;
-  text-rendering: optimizeLegibility;
-  word-break: keep-all;
-  overflow-wrap: anywhere;
-}
-.app-subtitle {
-  text-align: center;
-  margin-top: -0.05rem;
-  margin-bottom: 1.1rem;
-  opacity: 0.92;
-  font-size: clamp(12px, 1.08vw, 15px);
-}
-
-/* Sombre */
+.app-title { text-align: center; font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif; font-weight: 800; font-size: clamp(22px, 2.1vw, 30px); line-height: 1.12; margin: 0.7rem 0 0.45rem 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; font-variant-ligatures: none; font-feature-settings: "liga" 0, "clig" 0, "kern" 1; text-rendering: optimizeLegibility; word-break: keep-all; overflow-wrap: anywhere; }
+.app-subtitle { text-align: center; margin-top: -0.05rem; margin-bottom: 1.1rem; opacity: 0.92; font-size: clamp(12px, 1.08vw, 15px); }
 body, .block-container { background-color: #0e1117; color: #e8e6e3; }
 .app-subtitle { color: #c9c7c4; }
-
-/* Cartes */
 [data-testid="stMetric"] { background: #141823; border-radius: 10px; padding: 10px; border: 1px solid #1e2330; }
 </style>
 """
@@ -421,7 +394,7 @@ def backtest_mixed_sma_rsi(df, sma_fast=20, sma_slow=50, rsi_window=14, rsi_ente
     trades_df = pd.DataFrame(trades, columns=['Date','Action','Prix','Quantite'])
     return data, stats, trades_df
 
-# --------------------------- FONDAMENTAUX AUTO ---------------------------
+# --------------------------- FONDAMENTAUX ---------------------------
 def _detect_year_column(df: pd.DataFrame) -> Optional[str]:
     if df is None or df.empty:
         return None
@@ -455,10 +428,10 @@ def _year_span(df: pd.DataFrame) -> Optional[Tuple[int, int]]:
         return None
 
 @st.cache_data
-def compute_market_fundamentals_from_original(df_original_daily: pd.DataFrame, shares_outstanding: int) -> pd.DataFrame:
-    if df_original_daily.empty:
+def compute_market_fundamentals_from_original(df_original_filtered: pd.DataFrame, shares_outstanding: int) -> pd.DataFrame:
+    if df_original_filtered.empty:
         return pd.DataFrame()
-    df = df_original_daily.copy().sort_values('Date').set_index('Date')
+    df = df_original_filtered.copy().sort_values('Date').set_index('Date')
     df['ret'] = df['Close'].pct_change()
     ann = df.resample('Y').agg(
         last_price=('Close','last'),
@@ -563,7 +536,6 @@ def enrich_with_dividends_eps(ann_df: pd.DataFrame, shares_outstanding: int,
 
     if 'EPS' not in out.columns: out['EPS'] = np.nan
 
-    # Estimation via DPS + payout (dernière année)
     if manual_dps is not None and manual_payout_pct is not None and len(out) > 0:
         try:
             last_year = int(out['Annee'].max())
@@ -693,283 +665,107 @@ def describe_market_regimes(ann_df: pd.DataFrame) -> List[str]:
         out = [f"Période couverte {start}–{end} sans bloc standard complet ; tendance moyenne ≈ {df['annual_return_%'].mean():.1f}%."]
     return out
 
-# --------------------------- OUTILS PRÉSENTATION NOMBRES ---------------------------
-def format_pct_compact(x: float) -> str:
-    try:
-        return f"{float(x):.2f}%"
-    except Exception:
-        return str(x)
-
+# --------------------------- OUTILS & PRÉVISION (MENSUEL FIXE) ---------------------------
 def format_pct_scientific(x: float) -> str:
     try:
         return f"{float(x):.2e}%"
     except Exception:
         return str(x)
 
-# --------------------------- MODÈLES DE PRÉVISION (AUTO) ---------------------------
-def sMAPE(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    y_true = np.asarray(y_true, dtype=float)
-    y_pred = np.asarray(y_pred, dtype=float)
-    denom = (np.abs(y_true) + np.abs(y_pred))
-    denom = np.where(denom == 0, 1e-12, denom)
-    return 100.0 * np.mean(2.0 * np.abs(y_pred - y_true) / denom)
+def compute_log_returns(close: pd.Series) -> pd.Series:
+    close = close.astype(float)
+    return np.log(close).diff().dropna()
 
-def train_valid_split(series: pd.Series, valid_ratio: float = 0.2) -> Tuple[pd.Series, pd.Series]:
-    n = len(series)
-    n_valid = max(1, int(n * valid_ratio))
-    return series.iloc[:-n_valid], series.iloc[-n_valid:]
+def fit_arima101_on_returns(r_log: pd.Series):
+    model = ARIMA(r_log, order=(1,0,1))
+    res = model.fit(method_kwargs={"warn_convergence": False})
+    return res
 
-# ----- ARIMA simple (grille courte) -----
-def fit_arima_small(train: pd.Series, horizon: int, grid: List[Tuple[int,int,int]]) -> Tuple[np.ndarray, Optional[Tuple[int,int,int]], Optional[ARIMA]]:
-    best_aic = np.inf; best_order = None; best_model = None
-    for (p,d,q) in grid:
-        try:
-            m = ARIMA(train, order=(p,d,q)).fit(method_kwargs={"warn_convergence":False})
-            if m.aic < best_aic:
-                best_aic = m.aic; best_order = (p,d,q); best_model = m
-        except Exception:
-            continue
-    if best_model is None:
-        return np.full(horizon, float(train.iloc[-1])), None, None
-    try:
-        fc = best_model.forecast(steps=horizon)
-        return np.asarray(fc.values, dtype=float), best_order, best_model
-    except Exception:
-        return np.full(horizon, float(train.iloc[-1])), best_order, best_model
+def fit_garch11_on_residuals(residuals: pd.Series):
+    if not ARCH_AVAILABLE or len(residuals) < 60:
+        return None, None
+    am = ConstantMean(residuals.dropna())
+    am.volatility = ARCH_GARCH(1,1)
+    garch_res = am.fit(disp="off")
+    return am, garch_res
 
-# ----- SARIMA rapide (saisonnalité = 5 jours ouvrés) -----
-def fit_sarima_quick(series: pd.Series, horizon: int, season_len: int = 5) -> Tuple[np.ndarray, Optional[Tuple], Optional[SARIMAX]]:
-    candidates = [((1,1,1),(0,1,1,season_len)), ((1,1,0),(0,1,1,season_len)), ((0,1,1),(1,1,0,season_len))]
-    best_aic = np.inf; best = None; best_model = None
-    train, valid = train_valid_split(series, 0.2)
-    for order, sorder in candidates:
-        try:
-            m = SARIMAX(train, order=order, seasonal_order=sorder, enforce_stationarity=False, enforce_invertibility=False)
-            r = m.fit(disp=False)
-            aic = r.aic
-            if aic < best_aic:
-                best_aic = aic; best = (order, sorder); best_model = r
-        except Exception:
-            continue
-    if best_model is None:
-        return np.full(horizon, float(series.iloc[-1])), None, None
-    try:
-        fc = best_model.get_forecast(steps=min(horizon, len(valid))).predicted_mean
-        _ = sMAPE(valid.iloc[:len(fc)].values, fc.values)  # score non utilisé ici
-    except Exception:
-        pass
-    try:
-        full = SARIMAX(series, order=best[0], seasonal_order=best[1], enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
-        yhat = full.get_forecast(steps=horizon).predicted_mean.values
-        return np.asarray(yhat, dtype=float), best, full
-    except Exception:
-        return np.full(horizon, float(series.iloc[-1])), best, None
+def forecast_price_path_from_arima_garch(last_price: float, r_arima_res, garch_model, garch_res, horizon: int, seed: Optional[int] = None):
+    mu_fc = r_arima_res.get_forecast(steps=horizon).predicted_mean.values
+    if (garch_model is not None) and (garch_res is not None):
+        vf = garch_res.forecast(horizon=horizon, reindex=False).variance.values.flatten()
+        sigma = np.sqrt(np.maximum(vf, 1e-12))
+    else:
+        sigma = np.repeat(np.std(r_arima_res.resid), horizon)
+    lo_r = mu_fc - 1.28*sigma
+    hi_r = mu_fc + 1.28*sigma
+    price_fc = np.empty(horizon); price_lo = np.empty(horizon); price_hi = np.empty(horizon)
+    p = last_price; plo = last_price; phi = last_price
+    for t in range(horizon):
+        p  *= np.exp(mu_fc[t])
+        plo*= np.exp(lo_r[t])
+        phi*= np.exp(hi_r[t])
+        price_fc[t], price_lo[t], price_hi[t] = p, plo, phi
+    return price_fc, price_lo, price_hi
 
-# ----- GARCH(1,1) (si 'arch' dispo) -----
-def fit_garch_arx(series_close: pd.Series, horizon: int):
-    if not ARCH_AVAILABLE or len(series_close) < 60:
-        return None
-    px = series_close.astype(float)
-    ret = px.pct_change().dropna()
-    if ret.empty:
-        return None
-    try:
-        am = ARX(ret, lags=1, volatility=ARCH_GARCH(1,1), rescale=True)
-        res = am.fit(disp="off")
-        f = res.forecast(horizon=horizon, reindex=False)
-        mean_r = f.mean.values[-1]
-        var_r  = f.variance.values[-1]
-        std_r  = np.sqrt(var_r)
-
-        last_p = float(px.iloc[-1])
-        path_center = np.cumprod(1.0 + mean_r)
-        pred_close = last_p * path_center
-
-        path_hi = np.cumprod(1.0 + (mean_r + 1.96*std_r))
-        path_lo = np.cumprod(1.0 + (mean_r - 1.96*std_r))
-        upper = last_p * path_hi
-        lower = last_p * path_lo
-        return np.asarray(pred_close), np.asarray(lower), np.asarray(upper), res
-    except Exception:
-        return None
-
-# ----- Sélection & bandes -----
-def choose_best_model(series: pd.Series, horizon: int, valid_ratio: float = 0.2) -> Dict:
-    series = series.dropna().astype(float)
-    if len(series) < 30:
-        y_hat = np.full(horizon, float(series.iloc[-1]))
-        return {"name":"Naïf", "pred":y_hat, "order":None, "bands":None, "score":np.nan, "engine":None}
-
-    train, valid = train_valid_split(series, valid_ratio)
-    h = min(horizon, len(valid))
-    candidates = []
-
-    grid = [(0,1,0),(1,1,0),(0,1,1),(1,1,1)]
-    y_arima, order, _ = fit_arima_small(train, h, grid)
-    score_arima = sMAPE(valid.iloc[:h].values, y_arima)
-    candidates.append(("ARIMA" + (str(order) if order else ""), score_arima, ("arima", order)))
-
-    y_sarima, sorder, _ = fit_sarima_quick(series, h, season_len=5)  # <- 5 jours ouvrés
-    score_sarima = sMAPE(valid.iloc[:h].values, y_sarima[:h])
-    candidates.append((f"SARIMA{str(sorder) if sorder else ''}", score_sarima, ("sarima", sorder)))
-
-    garch_ok = fit_garch_arx(series, h)
-    if garch_ok is not None:
-        y_garch, _, _, _ = garch_ok
-        score_garch = sMAPE(valid.iloc[:h].values, y_garch[:h])
-        candidates.append(("ARX+GARCH(1,1)", score_garch, ("garch", None)))
-
-    best_name, best_score, best_tag = min(candidates, key=lambda t: t[1] if np.isfinite(t[1]) else np.inf)
-
-    bands = None
-    if best_tag[0] == "arima":
-        order = best_tag[1] if best_tag[1] else (1,1,1)
-        try:
-            m = ARIMA(series, order=order).fit(method_kwargs={"warn_convergence":False})
-            fc = m.get_forecast(steps=horizon)
-            pred = fc.predicted_mean.values
-            ci = fc.conf_int(alpha=0.2)
-            bands = (ci.iloc[:,0].values, ci.iloc[:,1].values)
-        except Exception:
-            pred = np.full(horizon, float(series.iloc[-1]))
-    elif best_tag[0] == "sarima":
-        order, sorder = (1,1,1), (0,1,1,5)
-        if best_tag[1] is not None:
-            order, sorder = best_tag[1]
-        try:
-            m = SARIMAX(series, order=order, seasonal_order=sorder, enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
-            fc = m.get_forecast(steps=horizon)
-            pred = fc.predicted_mean.values
-            ci = fc.conf_int(alpha=0.2)
-            bands = (ci.iloc[:,0].values, ci.iloc[:,1].values)
-        except Exception:
-            pred = np.full(horizon, float(series.iloc[-1]))
-    else:  # garch
-        ok = fit_garch_arx(series, horizon)
-        if ok is not None:
-            pred, lower, upper, _ = ok
-            bands = (lower, upper)
-        else:
-            pred = np.full(horizon, float(series.iloc[-1]))
-
-    return {"name": best_name, "pred": np.asarray(pred, dtype=float), "bands": bands, "score": float(best_score), "engine": best_tag[0]}
-
-def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon: int, bands=None, title: str = "Prévision") -> go.Figure:
+def forecast_figure(history: pd.DataFrame, y_col: str, pred: np.ndarray, horizon: int, bands=None, title: str = "Prévision"):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=history['Date'], y=history[y_col], mode='lines', name='Historique', line=dict(width=2.6)))
     last_date = pd.to_datetime(history['Date'].iloc[-1])
-    inferred = pd.infer_freq(history['Date'])
-    freq = inferred if inferred is not None else 'D'
-    future_idx = pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
-
+    future_idx = pd.date_range(last_date, periods=horizon+1, freq='M')[1:]
     if bands is not None:
         lo, hi = bands
         if len(lo) == horizon and len(hi) == horizon:
             fig.add_trace(go.Scatter(x=future_idx, y=hi, line=dict(width=0), showlegend=False))
             fig.add_trace(go.Scatter(x=future_idx, y=lo, fill='tonexty', name='Intervalle', opacity=0.18, line=dict(width=0)))
-
     fig.add_trace(go.Scatter(x=future_idx, y=pred, mode='lines+markers', name='Prévision', line=dict(width=2.8)))
-
-    # --- NOUVEAU : étendre l'axe X jusqu'à la dernière date future + ticks annuels
     x_min = pd.to_datetime(history['Date'].min())
     x_max = pd.to_datetime(future_idx[-1]) if len(future_idx) else pd.to_datetime(history['Date'].max())
     fig.update_xaxes(range=[x_min, x_max], dtick="M12", tickformat="%Y", ticklabelmode="period")
-
     fig.update_layout(title=title, height=460,
                       margin=dict(t=52,b=80,l=24,r=12),
                       legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
-def forecast_summary_for_investors(best: Dict, horizon: int, last_price: float, recent_returns: pd.Series) -> str:
-    name = best.get("name","?")
-    score = best.get("score", np.nan)
-    pred = np.asarray(best.get("pred", []), dtype=float)
-    if pred.size == 0:
-        return f"**Modèle retenu :** {name}. Aucune prévision exploitable."
-    avg_fc = float(np.mean(pred))
-    min_fc, max_fc = float(np.min(pred)), float(np.max(pred))
-    change_avg = 100.0 * (avg_fc/last_price - 1.0) if last_price else np.nan
-    x = np.arange(1, len(pred)+1)
-    try:
-        slope = float(np.polyfit(x, pred, 1)[0])
-    except Exception:
-        slope = 0.0
-    direction = "hausse" if change_avg > 1 else ("baisse" if change_avg < -1 else "stabilité")
-    mom = recent_returns.mean() * 100 if len(recent_returns) else np.nan
-    vol = recent_returns.std() * sqrt(252) * 100 if len(recent_returns) else np.nan
-    if np.isnan(score):
-        conf = "faible"
-    elif score <= 8:
-        conf = "élevée"
-    elif score <= 15:
-        conf = "moyenne"
+# --------------------------- SIMULATION (MENSUEL FIXE) ---------------------------
+def monte_carlo_arima_garch(last_price: float, r_arima_res, garch_model, garch_res,
+                            horizon: int = 12, n_paths: int = 5000, scenario: str = "Neutre", seed: Optional[int] = None):
+    rng = np.random.default_rng(seed)
+    mu = r_arima_res.get_forecast(steps=horizon).predicted_mean.values.astype(float)
+    if (garch_model is not None) and (garch_res is not None):
+        vf = garch_res.forecast(horizon=horizon, reindex=False).variance.values.flatten()
+        sigma = np.sqrt(np.maximum(vf, 1e-12)).astype(float)
     else:
-        conf = "faible"
-    verdict = "Haussier" if (change_avg >= 3 and (np.isnan(mom) or mom >= 0)) else ("Baissier" if (change_avg <= -3 and (np.isnan(mom) or mom <= 0)) else "Neutre")
-    band_note = " (avec bandes d’incertitude)" if best.get("bands") is not None else ""
-    lines = [
-        f"**Modèle retenu :** {name}{band_note}  |  **Erreur (sMAPE validation)** ≈ {score:.2f} %  → **Confiance {conf}**",
-        f"- **Direction attendue (sur {horizon} pas)** : {direction} (∆ moyen ≈ {change_avg:.2f} % vs. dernier prix)",
-        f"- **Fourchette prévue** : {min_fc:,.2f} – {max_fc:,.2f} FCFA  |  **Prix moyen prévu** : {avg_fc:,.2f} FCFA",
-        f"- **Pente attendue** : {slope:,.2f} FCFA/pas",
-        f"- **Momentum récent (20 derniers jours)** : {mom:.2f} %  |  **Vol annualisée récente** : {vol:.2f} %",
-        f"**Verdict** : {verdict}.",
-        "_Rappel : ce résumé est indicatif et ne constitue pas un conseil en investissement._"
-    ]
-    return "\n".join(lines)
+        sigma = np.repeat(np.std(r_arima_res.resid), horizon).astype(float)
+    if scenario.lower().startswith("opt"):
+        mu_adj = mu * 1.25; sigma_adj = sigma * 0.9
+    elif scenario.lower().startswith("pes"):
+        mu_adj = mu * 0.60; sigma_adj = sigma * 1.25
+    else:
+        mu_adj = mu.copy(); sigma_adj = sigma.copy()
+    eps = rng.standard_normal(size=(n_paths, horizon))
+    r_sim = mu_adj + sigma_adj * eps
+    prices = np.empty((n_paths, horizon))
+    prices[:, 0] = last_price * np.exp(r_sim[:, 0])
+    for t in range(1, horizon):
+        prices[:, t] = prices[:, t-1] * np.exp(r_sim[:, t])
+    return prices, r_sim
 
-# ---------- NOUVEAU : superposition “horizon courant” vs “projection 5 ans” ----------
-def _future_index(last_date: pd.Timestamp, history_index: pd.DatetimeIndex, horizon: int) -> pd.DatetimeIndex:
-    inferred = pd.infer_freq(history_index)
-    freq = inferred if inferred is not None else 'D'
-    return pd.date_range(last_date, periods=horizon+1, freq=freq)[1:]
+def var_cvar(returns: np.ndarray, alpha: float = 0.95) -> Tuple[float, float]:
+    losses = -returns
+    var = np.quantile(losses, alpha)
+    tail = losses[losses >= var]
+    cvar = tail.mean() if tail.size > 0 else var
+    return var, cvar
 
-def forecast_dual_figure(history: pd.DataFrame,
-                         pred_short: np.ndarray, horizon_short: int, bands_short,
-                         pred_long: np.ndarray,  horizon_long: int,  bands_long,
-                         show_trend_long: bool = True) -> go.Figure:
+def fan_chart_figure(base_dates: pd.DatetimeIndex, sims: np.ndarray, title: str) -> go.Figure:
+    q = np.quantile(sims, [0.1, 0.5, 0.9], axis=0)
     fig = go.Figure()
-    # Historique
-    fig.add_trace(go.Scatter(x=history['Date'], y=history['Close'], mode='lines', name='Historique', line=dict(width=2.6)))
-    last_date = pd.to_datetime(history['Date'].iloc[-1])
-    idx_short = _future_index(last_date, history['Date'], horizon_short)
-    idx_long  = _future_index(last_date, history['Date'], horizon_long)
-
-    # Bandes court terme
-    if bands_short is not None and len(bands_short[0]) == horizon_short:
-        lo_s, hi_s = bands_short
-        fig.add_trace(go.Scatter(x=idx_short, y=hi_s, line=dict(width=0), showlegend=False))
-        fig.add_trace(go.Scatter(x=idx_short, y=lo_s, fill='tonexty', name='IC Horizon courant', opacity=0.18, line=dict(width=0)))
-
-    # Bandes long terme
-    if bands_long is not None and len(bands_long[0]) == horizon_long:
-        lo_l, hi_l = bands_long
-        fig.add_trace(go.Scatter(x=idx_long, y=hi_l, line=dict(width=0), showlegend=False))
-        fig.add_trace(go.Scatter(x=idx_long, y=lo_l, fill='tonexty', name='IC Projection 5 ans', opacity=0.12, line=dict(width=0)))
-
-    # Courbes
-    fig.add_trace(go.Scatter(x=idx_short, y=pred_short, mode='lines+markers', name='Horizon courant', line=dict(width=2.8, color="#1f77b4")))
-    fig.add_trace(go.Scatter(x=idx_long,  y=pred_long,  mode='lines+markers', name='Projection 5 ans', line=dict(width=2.8, color="#ff7f0e")))
-
-    # Tendance 5 ans (régression linéaire sur la projection)
-    if show_trend_long and len(pred_long) >= 2:
-        x = np.arange(1, len(pred_long)+1)
-        a, b = np.polyfit(x, pred_long, 1)  # y = a*x + b
-        trend = a * x + b
-        fig.add_trace(go.Scatter(x=idx_long, y=trend, mode='lines', name='Tendance 5 ans', line=dict(width=2.2, dash='dash', color="#ff7f0e")))
-
-    # --- NOUVEAU : étendre l'axe X sur toute l'horizon 5 ans + graduations annuelles
-    x_min = pd.to_datetime(history['Date'].min())
-    x_max = pd.to_datetime(idx_long[-1]) if len(idx_long) else pd.to_datetime(history['Date'].max())
-    fig.update_xaxes(range=[x_min, x_max], dtick="M12", tickformat="%Y", ticklabelmode="period")
-
-    fig.update_layout(
-        title="Prévisions superposées : horizon courant vs projection 5 ans",
-        height=520,
-        margin=dict(t=60, b=90, l=24, r=12),
-        legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0)
-    )
+    fig.add_trace(go.Scatter(x=base_dates, y=q[2], line=dict(width=0), showlegend=False))
+    fig.add_trace(go.Scatter(x=base_dates, y=q[0], fill='tonexty', name='P10–P90', opacity=0.18, line=dict(width=0)))
+    fig.add_trace(go.Scatter(x=base_dates, y=q[1], mode='lines+markers', name='Médiane (P50)', line=dict(width=2.8)))
+    fig.update_layout(title=title, height=420, margin=dict(t=42,b=60,l=24,r=12),
+                      legend=dict(orientation='h', yanchor='top', y=-0.18, xanchor='left', x=0))
     set_fig_template(fig)
     return fig
 
@@ -986,47 +782,26 @@ def guide_tab():
         """)
     with st.expander("Métriques de performance", expanded=False):
         st.markdown("""
-- **Rendement total** ; **Annualisé** (selon fréquence) ; **Volatilité** ; **Sharpe** (taux sans risque paramétrable) ; **Max Drawdown**.  
+- **Rendement total** ; **Annualisé** (selon fréquence) ; **Volatilité** ; **Sharpe** ; **Max Drawdown**.  
 - **CAGR** et **Synthèse** dans la section fondamentaux.
         """)
     with st.expander("Backtests", expanded=False):
         st.markdown("**SMA Crossover**, **RSI+MACD**, **Mixte (SMA+RSI)** — frais (bps) inclus.")
-    with st.expander("Modèles de prédiction", expanded=False):
+    with st.expander("Modèles du mémoire", expanded=True):
         st.markdown("""
-- **ARIMA** & **SARIMA (saisonnalité 5ans)**.  
-- **ARX+GARCH(1,1)** (*si `arch` est installé*) : moyenne AR(1) + volatilité conditionnelle.  
-- **Sélection automatique** par **sMAPE** (mini-validation).  
-- **Graphique** : trajectoire prévue + **intervalle** (IC 80% pour ARIMA/SARIMA ou bandes de volatilité pour GARCH).
+- **Moyenne conditionnelle** : **ARIMA(1,0,1)** sur les rendements logarithmiques.  
+- **Volatilité conditionnelle** : **GARCH(1,1)**.  
+- **Prévision** : trajectoire moyenne + intervalle d'incertitude (mensuel fixe).  
+- **Simulation Monte-Carlo (12 mois, 5000 trajectoires)** avec **3 scénarios** et **VaR/CVaR** (mensuel fixe).  
         """)
-
-# ------ utilitaire : détecter fréquence & pas/an ------
-def _infer_freq_and_steps_per_year(idx: pd.DatetimeIndex) -> Tuple[str, int]:
-    inf = pd.infer_freq(idx)
-    if inf is None:
-        # fallback : pas médian
-        delta = idx.to_series().diff().median()
-        if pd.isna(delta):
-            return "D", 252
-        days = max(1, int(round(delta / pd.Timedelta(days=1))))
-        if days == 1: return "D", 252
-        if 5 <= days <= 8: return "W", 52
-        if 28 <= days <= 31: return "M", 12
-        return "D", 252
-    if inf.startswith("B") or inf.startswith("D"):
-        return "B", 252  # jours ouvrés
-    if inf.startswith("W"):
-        return "W", 52
-    if inf.startswith("M"):
-        return "M", 12
-    # défaut
-    return "D", 252
 
 # --------------------------- APP ---------------------------
 def main():
     apply_dark_theme()
     centered_title("Dashboard Marchés Boursiers – BRVM",
-                   "Analyse technique & fondamentale | Backtests | Prédiction auto (ARIMA / SARIMA s=5 / GARCH)")
+                   "Filtres globaux | Analyse technique & fondamentale | Backtests | Prévision ARIMA(1,0,1)+GARCH(1,1) (mensuel) | Simulation (mensuel)")
 
+    # État global
     if 'global_date_start' not in st.session_state:
         st.session_state.global_date_start = None
     if 'global_date_end' not in st.session_state:
@@ -1034,13 +809,14 @@ def main():
     if 'global_freq_code' not in st.session_state:
         st.session_state.global_freq_code = 'D'
 
-    tab_main, tab_forecast, tab_guide = st.tabs(["Tableau de bord", "Prédiction", "Guide & Méthode"])
+    # Onglets
+    tab_main, tab_forecast, tab_simul, tab_guide = st.tabs(["Tableau de bord", "Prévision", "Simulation", "Guide & Méthode"])
 
     # ===================== TAB PRINCIPAL =====================
     with tab_main:
         with st.sidebar:
             st.header("Données prix")
-            uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv")
+            uploader = st.file_uploader("Importer le CSV de PRIX", type=['csv'], key="price_csv_main")
             if uploader is not None:
                 df_original = load_data(uploader)
                 st.success("Données de prix chargées")
@@ -1052,11 +828,11 @@ def main():
                     st.error("Aucun fichier de prix. Importez un CSV")
                     st.stop()
 
-            shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000)
+            shares = st.number_input("Actions en circulation (exactes)", min_value=1, value=DEFAULT_SHARES_OUTSTANDING, step=1000, key="shares_input")
 
             st.header("Période & Fréquence (GLOBAL)")
-            freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0,
-                                help="S'applique à tous les onglets.")
+            freq = st.selectbox("Fréquence", ['Jour', 'Semaine', 'Mois'], index=0, key="freq_select",
+                                help="Pilote TOUT le dashboard (sauf agrégats annuels).")
             st.session_state.global_freq_code = {'Jour':'D','Semaine':'W','Mois':'M'}[freq]
 
             dmin, dmax = df_original['Date'].min().date(), df_original['Date'].max().date()
@@ -1065,7 +841,7 @@ def main():
                 st.session_state.global_date_end.date()   if st.session_state.global_date_end   is not None else dmax
             )
             dr = st.date_input("Fenêtre d'analyse (globale)", value=default_range, min_value=dmin, max_value=dmax,
-                               help="Utilisée dans *Tableau de bord* et *Prédiction*.")
+                               help="Utilisée dans *Tableau de bord*, *Prévision* et *Simulation*.", key="date_window")
             if isinstance(dr, tuple):
                 st.session_state.global_date_start = pd.to_datetime(dr[0])
                 st.session_state.global_date_end   = pd.to_datetime(dr[1])
@@ -1074,19 +850,19 @@ def main():
                 st.session_state.global_date_end   = pd.to_datetime(dmax)
 
             st.header("Indicateurs techniques")
-            indicators = st.multiselect("Sélection", ['MM', 'EMA', 'Bollinger', 'RSI', 'MACD'], default=['MM','RSI'])
+            indicators = st.multiselect("Sélection", ['MM', 'EMA', 'Bollinger', 'RSI', 'MACD'], default=['MM','RSI'], key="indics_select")
             with st.expander("Paramètres", expanded=False):
                 c1, c2 = st.columns(2)
                 with c1:
-                    sma1 = st.slider("MM1", 5, 60, 20, 1)
-                    sma2 = st.slider("MM2", 10, 200, 50, 1)
-                    ema1 = st.slider("EMA", 5, 60, 20, 1)
-                    bb_window = st.slider("BB Fenêtre", 10, 60, 20, 1)
+                    sma1 = st.slider("MM1", 5, 60, 20, 1, key="sma1_slider")
+                    sma2 = st.slider("MM2", 10, 200, 50, 1, key="sma2_slider")
+                    ema1 = st.slider("EMA", 5, 60, 20, 1, key="ema1_slider")
+                    bb_window = st.slider("BB Fenêtre", 10, 60, 20, 1, key="bbwin_slider")
                 with c2:
-                    bb_std = st.slider("BB Écart", 1.0, 3.0, 2.0, 0.1)
-                    rsi_window = st.slider("RSI", 5, 30, 14, 1)
-                    macd_fast = st.slider("MACD Rapide", 5, 20, 12, 1)
-                    macd_slow = st.slider("MACD Lent", 20, 40, 26, 1)
+                    bb_std = st.slider("BB Écart", 1.0, 3.0, 2.0, 0.1, key="bbsd_slider")
+                    rsi_window = st.slider("RSI", 5, 30, 14, 1, key="rsiw_slider")
+                    macd_fast = st.slider("MACD Rapide", 5, 20, 12, 1, key="macdf_slider")
+                    macd_slow = st.slider("MACD Lent", 20, 40, 26, 1, key="macds_slider")
 
             params = {
                 'show_sma':'MM' in indicators, 'sma1':sma1, 'sma2':sma2,
@@ -1097,52 +873,57 @@ def main():
             }
 
             st.header("Style & Risque")
-            chart_type = st.radio("Type de graphique", ['Ligne','Chandelles'])
-            rf = st.number_input("Taux sans risque (%)", value=2.0, step=0.5)
+            chart_type = st.radio("Type de graphique", ['Ligne','Chandelles'], key="chart_type_radio")
+            rf = st.number_input("Taux sans risque (%)", value=2.0, step=0.5, key="rf_input")
 
             st.header("Backtesting")
-            strat = st.selectbox("Stratégie", ["SMA Crossover", "RSI + MACD", "Mixte (SMA + RSI)"])
+            strat = st.selectbox("Stratégie", ["SMA Crossover", "RSI + MACD", "Mixte (SMA + RSI)"], key="strat_select")
             if strat == "SMA Crossover":
                 b1,b2,b3 = st.columns(3)
-                with b1: bt_fast = st.number_input("MM rapide", 2, 200, 20, 1)
-                with b2: bt_slow = st.number_input("MM lente", 5, 400, 50, 1)
-                with b3: bt_fee  = st.number_input("Frais (bps)", 0.0, 200.0, 10.0, 1.0)
+                with b1: bt_fast = st.number_input("MM rapide", 2, 200, 20, 1, key="bt_sma_fast")
+                with b2: bt_slow = st.number_input("MM lente", 5, 400, 50, 1, key="bt_sma_slow")
+                with b3: bt_fee  = st.number_input("Frais (bps)", 0.0, 200.0, 10.0, 1.0, key="bt_sma_fee")
             elif strat == "RSI + MACD":
                 b1,b2,b3 = st.columns(3)
-                with b1: bt_rsi_buy = st.slider("RSI sous-achat", 10, 40, 30, 1)
-                with b2: bt_rsi_confirm = st.slider("RSI confirmation", 30, 60, 50, 1)
-                with b3: bt_rsi_sell = st.slider("RSI surachat", 50, 90, 70, 1)
+                with b1: bt_rsi_buy = st.slider("RSI sous-achat", 10, 40, 30, 1, key="bt_rsi_buy")
+                with b2: bt_rsi_confirm = st.slider("RSI confirmation", 30, 60, 50, 1, key="bt_rsi_confirm")
+                with b3: bt_rsi_sell = st.slider("RSI surachat", 50, 90, 70, 1, key="bt_rsi_sell")
                 c4,c5,c6 = st.columns(3)
-                with c4: bt_macd_fast = st.slider("MACD rapide", 5, 20, 12, 1)
-                with c5: bt_macd_slow = st.slider("MACD lent", 20, 40, 26, 1)
-                with c6: bt_macd_signal = st.slider("MACD signal", 5, 20, 9, 1)
-                bt_fee = st.number_input("Frais (bps)", 0.0, 200.0, 10.0, 1.0)
+                with c4: bt_macd_fast = st.slider("MACD rapide", 5, 20, 12, 1, key="bt_macd_fast")
+                with c5: bt_macd_slow = st.slider("MACD lent", 20, 40, 26, 1, key="bt_macd_slow")
+                with c6: bt_macd_signal = st.slider("MACD signal", 5, 20, 9, 1, key="bt_macd_signal")
+                bt_fee = st.number_input("Frais (bps)", 0.0, 200.0, 10.0, 1.0, key="bt_rsi_fee")
             else:
                 b1,b2,b3 = st.columns(3)
-                with b1: mix_sma_fast = st.number_input("MM rapide", 2, 200, 20, 1)
-                with b2: mix_sma_slow = st.number_input("MM lente", 5, 400, 50, 1)
-                with b3: mix_fee = st.number_input("Frais (bps)", 0.0, 200.0, 10.0, 1.0)
+                with b1: mix_sma_fast = st.number_input("MM rapide", 2, 200, 20, 1, key="mix_sma_fast")
+                with b2: mix_sma_slow = st.number_input("MM lente", 5, 400, 50, 1, key="mix_sma_slow")
+                with b3: mix_fee = st.number_input("Frais (bps)", 0.0, 200.0, 10.0, 1.0, key="mix_fee")
                 c4,c5 = st.columns(2)
-                with c4: mix_rsi_enter = st.slider("RSI entrée", 40, 70, 55, 1)
-                with c5: mix_rsi_exit  = st.slider("RSI sortie", 20, 60, 45, 1)
+                with c4: mix_rsi_enter = st.slider("RSI entrée", 40, 70, 55, 1, key="mix_rsi_enter")
+                with c5: mix_rsi_exit  = st.slider("RSI sortie", 20, 60, 45, 1, key="mix_rsi_exit")
 
             st.header("Dividendes & Bénéfices (facultatif)")
             dps_uploader = st.file_uploader("CSV DPS par année", type=['csv'], key="dps_csv")
             eps_uploader = st.file_uploader("CSV EPS (ou Résultat net)", type=['csv'], key="eps_csv")
 
             st.subheader("Saisie manuelle (si pas de fichiers)")
-            manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0)
-            manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0)
+            manual_dps   = st.number_input("DPS (dernière année)", min_value=0.0, value=0.0, step=1.0, key="manual_dps")
+            manual_payout= st.number_input("Payout ratio (%)", min_value=0.0, max_value=100.0, value=0.0, step=1.0, key="manual_payout")
 
-        # ===== TRAITEMENTS (filtre global) =====
+        # ===== TRAITEMENTS GLOBAUX =====
         start_date = st.session_state.global_date_start
         end_date   = st.session_state.global_date_end
-        df_global = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
+        # Base filtrée (JOUR)
+        df_filtered_daily = df_original[(df_original['Date'] >= start_date) & (df_original['Date'] <= end_date)].copy()
+        # Resample global à la fréquence choisie (D/W/M)
+        df_resampled = resample_ohlcv(df_filtered_daily, st.session_state.global_freq_code)
 
-        df = add_indicators(resample_ohlcv(df_global, freq_code=st.session_state.global_freq_code), params)
-        metrics = performance_metrics(df, rf_annual_pct=rf, freq_code=st.session_state.global_freq_code)
+        # Indicateurs + métriques sur la vue resamplée
+        df_view = add_indicators(df_resampled, params)
+        metrics = performance_metrics(df_view, rf_annual_pct=rf, freq_code=st.session_state.global_freq_code)
 
-        ann_df = compute_market_fundamentals_from_original(df_global, shares)
+        # Fondamentaux annuels sur base FILTRÉE (toujours annuel)
+        ann_df = compute_market_fundamentals_from_original(df_filtered_daily, shares)
 
         if dps_uploader is not None:
             dps_df = _parse_year_value_df(dps_uploader, ['DPS','dps','dividend_per_share','dividende','dividendes','dividende_par_action'])
@@ -1173,15 +954,15 @@ def main():
         m1,m2,m3,m4,m5,m6 = st.columns(6)
         m1.metric(f"Prix ({badge})", f"{metrics['current_price']:.0f} FCFA")
         m2.metric("Rendement total", f"{metrics['total_return']:.1f}%")
-        m3.metric("Rend. annualisé", format_pct_scientific(metrics['annualized_return']))  # scientifique
+        m3.metric("Rend. annualisé", format_pct_scientific(metrics['annualized_return']))
         m4.metric("Volatilité", f"{metrics['volatility']:.1f}%")
         m5.metric("Max DD", f"{metrics['max_drawdown']:.1f}%")
         m6.metric("Sharpe", f"{metrics['sharpe']:.2f}")
-        st.caption(f"Période affichée : {df['Date'].min().date()} → {df['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
+        st.caption(f"Période affichée : {df_view['Date'].min().date()} → {df_view['Date'].max().date()} | Dernière MAJ: {metrics['last_update']}")
 
         # ===== 1) GRAPHIQUE TECHNIQUE =====
         st.subheader("Graphique technique")
-        tech_fig = plotly_combined_chart(df, chart_type, params)
+        tech_fig = plotly_combined_chart(df_view, chart_type, params)
         st.plotly_chart(tech_fig, use_container_width=True, config={"displaylogo": False})
 
         # ===== 2) Dividend Yield & PER (AUTO) =====
@@ -1203,28 +984,28 @@ def main():
             st.download_button(
                 f"Télécharger fondamentaux {fund_title_suffix} (CSV)",
                 ann_df.to_csv(index=False).encode('utf-8'),
-                file_name=fname, mime="text/csv"
+                file_name=fname, mime="text/csv", key="dl_fonda"
             )
         else:
             st.info("Aucun fondamental calculable (fichier vide ou colonnes manquantes).")
 
         # ===== 4) BACKTEST =====
         st.subheader(f"Backtesting — {strat}")
-        if len(df) < 10:
+        if len(df_view) < 10:
             st.warning("Période trop courte pour backtester.")
         else:
             if strat == "SMA Crossover":
-                bt_df, bt_stats, bt_trades = backtest_sma(df, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
+                bt_df, bt_stats, bt_trades = backtest_sma(df_view, fast=int(bt_fast), slow=int(bt_slow), fee_bps=float(bt_fee))
             elif strat == "RSI + MACD":
                 bt_df, bt_stats, bt_trades = backtest_rsi_macd(
-                    df, rsi_window=int(rsi_window),
+                    df_view, rsi_window=int(rsi_window),
                     rsi_buy=float(bt_rsi_buy), rsi_confirm=float(bt_rsi_confirm), rsi_sell=float(bt_rsi_sell),
                     macd_fast=int(bt_macd_fast), macd_slow=int(bt_macd_slow), macd_signal=int(bt_macd_signal),
                     fee_bps=float(bt_fee)
                 )
             else:
                 bt_df, bt_stats, bt_trades = backtest_mixed_sma_rsi(
-                    df, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
+                    df_view, sma_fast=int(mix_sma_fast), sma_slow=int(mix_sma_slow),
                     rsi_window=int(rsi_window), rsi_enter=float(mix_rsi_enter), rsi_exit=float(mix_rsi_exit),
                     fee_bps=float(mix_fee)
                 )
@@ -1233,7 +1014,7 @@ def main():
             d1.metric("Capital initial", f"{bt_stats['capital_initial']:,.0f} FCFA")
             d2.metric("Capital final", f"{bt_stats['capital_final']:,.0f} FCFA")
             d3.metric("Perf. totale", f"{bt_stats['perf_totale_%']:.1f}%")
-            d4.metric("Perf. annualisée", format_pct_scientific(bt_stats['perf_annualisee_%']))  # scientifique
+            d4.metric("Perf. annualisée", format_pct_scientific(bt_stats['perf_annualisee_%']))
             d5.metric("Max DD", f"{bt_stats['max_drawdown_%']:.1f}%")
             d6.metric("Sharpe", f"{bt_stats['sharpe']:.2f}")
 
@@ -1243,9 +1024,10 @@ def main():
             set_fig_template(eq_fig)
             st.plotly_chart(eq_fig, use_container_width=True, config={"displaylogo": False})
 
-    # ===================== TAB PRÉDICTION =====================
+    # ===================== TAB PRÉVISION (Mensuel Fixe) =====================
     with tab_forecast:
-        st.markdown("### Paramètres de prédiction")
+        st.markdown("### Paramètres de prévision — ARIMA(1,0,1) + GARCH(1,1) (horizon mensuel fixe)")
+        # Recharger la base si nécessaire (mêmes filtres globaux)
         if 'df_original' not in locals():
             if os.path.exists(DEFAULT_PRICE_PATH):
                 df_original = load_data(DEFAULT_PRICE_PATH)
@@ -1253,103 +1035,136 @@ def main():
                 st.error("Chargez d'abord les données dans l'onglet principal.")
                 st.stop()
 
-        dmin_f, dmax_f = df_original['Date'].min().date(), df_original['Date'].max().date()
-
-        use_global_window = st.checkbox("Utiliser la même fenêtre que le Tableau de bord (global)", value=True)
-        if use_global_window:
-            start_f = st.session_state.global_date_start
-            end_f   = st.session_state.global_date_end
-        else:
-            dr_f = st.date_input("Fenêtre spécifique à la prédiction", value=(dmin_f, dmax_f), min_value=dmin_f, max_value=dmax_f, key="pred_dates")
-            start_f, end_f = (pd.to_datetime(dr_f[0]), pd.to_datetime(dr_f[1])) if isinstance(dr_f, tuple) else (pd.to_datetime(dmin_f), pd.to_datetime(dmax_f))
-
-        # Série de travail
-        df_pred = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
-        df_pred = df_pred.sort_values('Date').reset_index(drop=True)
-        s = df_pred.set_index('Date')['Close'].astype(float)
-        if len(s) < 30:
-            st.warning("Période trop courte pour comparer les modèles. Étendez la fenêtre.")
+        start_f = st.session_state.global_date_start
+        end_f   = st.session_state.global_date_end
+        df_filtered_daily = df_original[(df_original['Date'] >= start_f) & (df_original['Date'] <= end_f)].copy()
+        # Prévision TOUJOURS sur données mensuelles (mémoire)
+        df_m = resample_ohlcv(df_filtered_daily, 'M')
+        if len(df_m) < 24:
+            st.warning("Au moins 24 points mensuels sont requis.")
             st.stop()
 
-        # Fréquence et pas/an
-        freq_code, steps_per_year = _infer_freq_and_steps_per_year(s.index)
+        s_close = df_m.set_index('Date')['Close'].astype(float)
+        r_log = compute_log_returns(s_close)
 
-        # Horizon courant (manuel) + Projection 5 ans (fixe)
-        colH1, colH2 = st.columns([2,1])
-        with colH1:
-            horizon_short = st.number_input("Horizon courant (pas de temps)", min_value=1, max_value=5000, value=60, step=1)
-        with colH2:
-            st.caption(f"Fréquence détectée : **{freq_code}** • ~**{steps_per_year}** pas/an")
-        horizon_long = 5 * steps_per_year  # toujours 5 ans
+        with st.spinner("Estimation ARIMA(1,0,1) sur les rendements…"):
+            arima_res = fit_arima101_on_returns(r_log)
+        with st.spinner("Estimation GARCH(1,1) sur les résidus…"):
+            garch_model, garch_res = fit_garch11_on_residuals(arima_res.resid)
 
-        with st.spinner("Sélection automatique du meilleur modèle (ARIMA / SARIMA s=5 / GARCH)…"):
-            best_short = choose_best_model(s, horizon=int(horizon_short), valid_ratio=0.2)
-            best_long  = choose_best_model(s, horizon=int(horizon_long),  valid_ratio=0.2)
+        horizon_months = st.number_input("Horizon (mois)", min_value=3, max_value=60, value=12, step=1, key="forecast_horizon_months")
+        last_price = float(s_close.iloc[-1])
 
-        hist_df = pd.DataFrame({'Date': s.index, 'Close': s.values})
-
-        # Graphe superposé + tendance 5 ans
-        dual_fig = forecast_dual_figure(
-            hist_df,
-            np.asarray(best_short['pred'], dtype=float), int(horizon_short), best_short.get("bands"),
-            np.asarray(best_long['pred'],  dtype=float), int(horizon_long),  best_long.get("bands"),
-            show_trend_long=True
+        price_fc, price_lo, price_hi = forecast_price_path_from_arima_garch(
+            last_price, arima_res, garch_model, garch_res, int(horizon_months), seed=42
         )
-        st.plotly_chart(dual_fig, use_container_width=True, config={"displaylogo": False})
 
-        #Projections 5ans
-        st.markdown("---\n### Projection 5 ans")
-        last_price = float(s.iloc[-1])
-        recent_returns = s.pct_change().dropna().tail(20)
-        st.markdown(forecast_summary_for_investors(best_long, int(horizon_long), last_price, recent_returns))
+        hist_df = pd.DataFrame({'Date': s_close.index, 'Close': s_close.values})
+        fc_fig = forecast_figure(hist_df, 'Close', price_fc, int(horizon_months), bands=(price_lo, price_hi),
+                                 title="Prévision (ARIMA(1,0,1) + GARCH(1,1)) — horizon mensuel")
+        st.plotly_chart(fc_fig, use_container_width=True, config={"displaylogo": False})
 
-        # Téléchargement CSV des prévisions superposées
-        last_date = hist_df['Date'].iloc[-1]
-        idx_short = _future_index(last_date, hist_df['Date'], int(horizon_short))
-        idx_long  = _future_index(last_date, hist_df['Date'], int(horizon_long))
+        chg_avg = 100.0*(np.mean(price_fc)/last_price - 1.0)
+        st.markdown(f"- Dernier prix : **{last_price:,.2f}** FCFA  |  Variation moyenne prévue (horizon) : **{chg_avg:.2f}%**")
+        st.caption("Intervalle d'incertitude ≈ IC 80% (construction ±1.28σ sur rendements log).")
 
-        # Tendance 5 ans pour le CSV
-        x = np.arange(1, len(best_long['pred'])+1)
-        if len(x) >= 2:
-            a, b = np.polyfit(x, best_long['pred'], 1)
-            trend_long = a * x + b
-        else:
-            trend_long = np.array(best_long['pred'])
-
-        def _bands_to_cols(bands, horizon):
-            if bands is None or len(bands[0]) != horizon:
-                return [np.repeat(np.nan, horizon), np.repeat(np.nan, horizon)]
-            return [bands[0], bands[1]]
-
-        lo_s, hi_s = _bands_to_cols(best_short.get("bands"), int(horizon_short))
-        lo_l, hi_l = _bands_to_cols(best_long.get("bands"),  int(horizon_long))
-
-        out_fc = pd.DataFrame({
-            'Date_short': idx_short, 'Forecast_short': best_short['pred'], 'Low_short': lo_s, 'High_short': hi_s
-        })
-        out_fc_long = pd.DataFrame({
-            'Date_long': idx_long, 'Forecast_5y': best_long['pred'], 'Low_5y': lo_l, 'High_5y': hi_l, 'Trend_5y': trend_long
-        })
-        # fusion simple en colonnes séparées (long = plus long)
-        out = pd.concat([
-            out_fc.set_index('Date_short').reindex(idx_long),
-            out_fc_long.set_index('Date_long')
-        ], axis=1).reset_index().rename(columns={'index':'Date'})
-
-        st.download_button(
-            "Télécharger prévisions superposées (CSV)",
-            out.to_csv(index=False).encode('utf-8'),
-            file_name="previsions_superposees.csv",
-            mime="text/csv"
-        )
+        future_idx = pd.date_range(s_close.index[-1], periods=int(horizon_months)+1, freq='M')[1:]
+        out = pd.DataFrame({'Date': future_idx, 'Forecast': price_fc, 'Low_approx': price_lo, 'High_approx': price_hi})
+        st.download_button("Télécharger la prévision (CSV)", out.to_csv(index=False).encode('utf-8'),
+                           file_name="prevision_arima_garch.csv", mime="text/csv", key="dl_forecast")
 
         if not ARCH_AVAILABLE:
-            st.caption("💡 Astuce : pour activer **GARCH**, installez le paquet `arch` dans votre environnement (sinon il sera ignoré).")
+            st.caption("Astuce : pour activer **GARCH**, installez le paquet `arch` (sinon écart-type fixe des résidus ARIMA).")
+
+    # ===================== TAB SIMULATION (Mensuel Fixe) =====================
+    with tab_simul:
+        st.markdown("### Simulation Monte-Carlo — 12 mois, 5000 trajectoires, scénarios (mensuel fixe)")
+        st.write("Méthode : ARIMA(1,0,1) pour la moyenne des rendements log, GARCH(1,1) pour la volatilité conditionnelle. Mesures de risque VaR/CVaR.")
+
+        if 'df_original' not in locals():
+            if os.path.exists(DEFAULT_PRICE_PATH):
+                df_original = load_data(DEFAULT_PRICE_PATH)
+            else:
+                st.error("Chargez d'abord les données dans l'onglet principal.")
+                st.stop()
+
+        start_s = st.session_state.global_date_start
+        end_s   = st.session_state.global_date_end
+        df_filtered_daily = df_original[(df_original['Date'] >= start_s) & (df_original['Date'] <= end_s)].copy()
+        df_m = resample_ohlcv(df_filtered_daily, 'M')
+        if len(df_m) < 24:
+            st.warning("Au moins 24 points mensuels sont requis.")
+            st.stop()
+
+        s_close = df_m.set_index('Date')['Close'].astype(float)
+        r_log = compute_log_returns(s_close)
+
+        with st.spinner("Estimation ARIMA(1,0,1) & GARCH(1,1)…"):
+            arima_res = fit_arima101_on_returns(r_log)
+            garch_model, garch_res = fit_garch11_on_residuals(arima_res.resid)
+
+        colA, colB, colC = st.columns(3)
+        with colA:
+            horizon_mc = st.number_input("Horizon (mois)", 3, 60, 12, 1, key="mc_horizon")
+        with colB:
+            n_paths = st.number_input("Nb trajectoires", 100, 20000, 5000, 100, key="mc_paths")
+        with colC:
+            seed = st.number_input("Graine aléatoire", 0, 10_000, 42, 1, key="mc_seed")
+
+        last_price = float(s_close.iloc[-1])
+        base_idx = pd.date_range(s_close.index[-1], periods=int(horizon_mc)+1, freq='M')[1:]
+
+        scenarios = ["Optimiste", "Neutre", "Pessimiste"]
+        sim_results = {}
+        for sc in scenarios:
+            sims, r_sim = monte_carlo_arima_garch(
+                last_price, arima_res, garch_model, garch_res,
+                horizon=int(horizon_mc), n_paths=int(n_paths), scenario=sc, seed=int(seed)
+            )
+            sim_results[sc] = (sims, r_sim)
+
+        st.subheader("Fan-charts (P10–P90) par scénario")
+        for sc in scenarios:
+            sims, _ = sim_results[sc]
+            fig = fan_chart_figure(base_idx, sims, f"Scénario {sc}")
+            st.plotly_chart(fig, use_container_width=True, config={"displaylogo": False})
+
+        st.subheader("Synthèse à l’horizon")
+        rows = []
+        for sc in scenarios:
+            sims, _ = sim_results[sc]
+            pT = sims[:, -1]
+            ret = pT/last_price - 1.0
+            p10, p50, p90 = np.quantile(pT, [0.10, 0.50, 0.90])
+            var95, cvar95 = var_cvar(ret, alpha=0.95)
+            rows.append({
+                "Scénario": sc,
+                "P10 (FCFA)": round(p10, 2),
+                "P50 (FCFA)": round(p50, 2),
+                "P90 (FCFA)": round(p90, 2),
+                "VaR95 (perte %)": round(100*var95, 2),
+                "CVaR95 (perte %)": round(100*cvar95, 2)
+            })
+        df_syn = pd.DataFrame(rows)
+        st.dataframe(df_syn, use_container_width=True)
+
+        out_rows = []
+        for sc in scenarios:
+            sims, _ = sim_results[sc]
+            q = np.quantile(sims, [0.10,0.50,0.90], axis=0)
+            df_q = pd.DataFrame({
+                "Date": base_idx, f"{sc}_P10": q[0], f"{sc}_P50": q[1], f"{sc}_P90": q[2]
+            })
+            out_rows.append(df_q.set_index("Date"))
+        out_all = pd.concat(out_rows, axis=1).reset_index()
+        st.download_button("Télécharger quantiles simulés (CSV)", out_all.to_csv(index=False).encode('utf-8'),
+                           file_name="simulations_quantiles.csv", mime="text/csv", key="dl_mc")
+
+        st.caption("Remarque : VaR/CVaR calculées sur les rendements cumulés à l'horizon (pertes positives).")
 
     # ===================== TAB GUIDE =====================
     with tab_guide:
         guide_tab()
-
 
 if __name__ == "__main__":
     main()
